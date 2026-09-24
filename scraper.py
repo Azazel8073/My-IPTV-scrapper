@@ -20,6 +20,7 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTV-Parser-Engine/6.0"
 ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
 NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID")
 API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
+BASE_API_URL = os.environ.get("CF_BASE_API_URL")
 
 def loose_base64_decode(text_chunk):
     cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', text_chunk)
@@ -54,6 +55,10 @@ def main():
     session.mount("https://", adapter)
     session.mount("http://", adapter)
 
+    if not BASE_API_URL:
+        print("Error: CF_BASE_API_URL variable is missing in the workflow environment.")
+        return
+
     print(f"Connecting to target RSS layout endpoint: {SUBREDDIT_RSS_URL}")
     try:
         response = session.get(SUBREDDIT_RSS_URL, headers={"User-Agent": USER_AGENT}, timeout=15)
@@ -66,9 +71,9 @@ def main():
 
     discovered_urls = []
 
-    # HARDCODED REPAIR ENGINE VALUE LAYER: Completely ignores any bad or broken formatting paths
-    kv_endpoint = "https://cloudflare.com" + str(ACCOUNT_ID) + "/storage/kv/namespaces/" + str(NAMESPACE_ID) + "/values/raw_credentials"
-
+    # Dynamic pipeline construction completely isolates the URL from phone clipping
+    kv_endpoint = f"{BASE_API_URL}/{ACCOUNT_ID}/storage/kv/namespaces/{NAMESPACE_ID}/values/raw_credentials"
+    
     kv_headers = {
         "Authorization": f"Bearer {API_TOKEN}",
         "Content-Type": "text/plain"
