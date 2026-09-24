@@ -28,5 +28,6 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_NAMESPACE_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # ⚠️ FIXED BASE: Passed securely by GitHub system environments directly
+          CF_BASE_API_URL: "https://cloudflare.com"
         run: python scraper.py
-
