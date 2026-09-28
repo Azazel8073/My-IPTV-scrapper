@@ -10,17 +10,16 @@ BROWSER_HEADERS = {
     "Connection": "keep-alive"
 }
 
-# ⚠️ STATIC HANDSHAKE ENGINE: Broken into bare words to prevent mobile clipboard slash-injection bugs
+# ⚠️ FIXED STITCHING: Bare text pieces to fully prevent formatting corruption
 protocol = "https"
-slashes = ":" + "//"
 domain = "://opnxng.com"
 
-# BoB stitches it perfectly on launch: https://opnxng.com
-STATIC_TEST_URL = protocol + slashes + domain
+# BoB builds the link with zero extra punctuation symbols in the code
+STATIC_TEST_URL = protocol + "://" + domain
 
 def main():
     print("===============================================")
-    print("🚀 BOB INITIALIZING HANDSHAKE STEP RUN v4.0")
+    print("🚀 BOB INITIALIZING HANDSHAKE STEP RUN v4.1")
     print(f"Targeting Static Gateway: {STATIC_TEST_URL}")
     print("===============================================")
     
