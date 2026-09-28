@@ -10,14 +10,10 @@ CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_AC
 CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
-# Production API hostname route
-CF_BASE_API_URL = "https://api.cloudflare.com"
+# Production Cloudflare REST hostname route
+CF_BASE_API_URL = "https://cloudflare.com"
 
-# Crucial Custom User-Agent to bypass Reddit's 403 datacenter block
-REDDIT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 AggregatorScraper/1.0"
-}
-
+# Standard Request Headers for downstream pastes
 PASTE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,text/plain,*/*"
@@ -35,7 +31,7 @@ def extract_credentials_from_text(text):
 
 def extract_and_decode_base64(content_string):
     """
-    Locates base64 segments within post fields, translates them, and processes the downstream files.
+    Locates base64 segments within post fields, translates them, and processes downstream files.
     """
     b64_pattern = r'[A-Za-z0-9+/]{16,}={0,2}'
     candidates = re.findall(b64_pattern, content_string)
@@ -51,7 +47,7 @@ def extract_and_decode_base64(content_string):
             
             if decoded_str.startswith("http://") or decoded_str.startswith("https://"):
                 if "paste.sh/" in decoded_str:
-                    decoded_str = decoded_str.split('#')[0].rstrip('/') + '/raw'
+                    decoded_str = decoded_str.split('#').rstrip('/') + '/raw'
                 
                 print(f"       🔗 Pulling credentials from target paste provider: {decoded_str}")
                 try:
@@ -99,28 +95,34 @@ def write_to_cloudflare_kv(key, value):
     return False
 
 
-def get_reddit_json(target_url):
+def get_reddit_json_via_anonymizer(target_url):
     """
-    Queries Reddit's native JSON endpoint securely with standard browser request contexts.
+    Bypasses datacenter 403 blocks by querying the data layer through a public CORS engine.
     """
-    req = urllib.request.Request(target_url, headers=REDDIT_HEADERS, method="GET")
+    encoded_target = urllib.parse.quote_plus(target_url)
+    # Using an open API bridge to mask the GitHub Actions server IP signature
+    proxy_url = f"https://allorigins.win{encoded_target}"
+    
+    req = urllib.request.Request(proxy_url, headers=PASTE_HEADERS, method="GET")
     with urllib.request.urlopen(req, timeout=15) as response:
         if response.status == 200:
-            return json.loads(response.read().decode('utf-8'))
-    raise Exception(f"Reddit data engine returned non-OK status: {response.status}")
+            wrapper_data = json.loads(response.read().decode('utf-8'))
+            # AllOrigins returns the stringified response object inside the 'contents' field
+            return json.loads(wrapper_data.get("contents"))
+    raise Exception(f"Anonymizer engine returned non-OK response.")
 
 
 def main():
     print("===============================================")
     print("🚀 INITIALIZING PIPELINE DISCOVERY ENGINE")
-    print("Target Channel: /r/IPTV_ZONENEW via Native Data Route")
+    print("Target Channel: /r/IPTV_ZONENEW via Keyless Bridge")
     print("===============================================")
     
     try:
-        # Utilizing direct JSON parsing structures to completely bypass proxy dependence
+        # Appending .json to pull raw text without needing account keys or OAuth validation
         target_main_feed = "https://reddit.com"
-        print("🔄 Pulling new master thread lists from target subreddit...")
-        feed_data = get_reddit_json(target_main_feed)
+        print("🔄 Pulling new master thread lists from open network bridge...")
+        feed_data = get_reddit_json_via_anonymizer(target_main_feed)
         
         children = feed_data.get("data", {}).get("children", [])
         print(f"Successfully discovered {len(children)} active target threads.")
@@ -138,18 +140,16 @@ def main():
             
             print(f"[{i+1}/{len(children)}] Processing Thread [{token}] - Title: {title[:30]}...")
             
-            # Extract and decrypt from the text body field directly
             if description_text:
                 found_credentials = extract_and_decode_base64(description_text)
                 if found_credentials:
                     all_compiled_credentials.extend(found_credentials)
             
-            # Fetch corresponding comments for hidden updates
+            # Fetch comment blocks natively via identical open bridge routes
             try:
                 comments_url = f"https://reddit.com{token}.json"
-                comments_data = get_reddit_json(comments_url)
+                comments_data = get_reddit_json_via_anonymizer(comments_url)
                 
-                # Reddit comment responses return as a secondary index list object array
                 if isinstance(comments_data, list) and len(comments_data) > 1:
                     comment_listings = comments_data[1].get("data", {}).get("children", [])
                     for comment_node in comment_listings:
