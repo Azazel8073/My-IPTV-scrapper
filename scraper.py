@@ -18,8 +18,8 @@ CF_MASTER_API_URL = cf_p1 + cf_p2
 
 # High-availability proxy pool targets to avoid reddit rate blocks
 BACKUP_FEEDS = [
-    "https://extranic.me",
     "https://workers.dev",
+    "https://extranic.me",
     "https://opnxng.com"
 ]
 
@@ -56,6 +56,8 @@ def main():
     # Step 1: Connect to high-availability data stream mirrors natively
     raw_text_payload = ""
     active_feed_base = ""
+    is_json_feed = False
+    
     for target_feed in BACKUP_FEEDS:
         print(f"Connecting to data pipeline endpoint: {target_feed}")
         reddit_headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
@@ -63,9 +65,10 @@ def main():
         
         if status == 200 and len(text_response) > 100:
             raw_text_payload = text_response
-            # FIXED LOGIC: Correctly extracted netloc layout component string parameters
             parsed_uri = urllib.parse.urlparse(target_feed)
             active_feed_base = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
+            if target_feed.endswith(".json"):
+                is_json_feed = True
             print(f"Success! Pulled raw layout text stream via: {target_feed}")
             break
 
@@ -82,17 +85,40 @@ def main():
         discovered_urls = [line.strip() for line in existing_kv_text.split("\n") if line.strip()]
         print(f"Loaded {len(discovered_urls)} active database lines from Cloudflare KV.")
 
-    clean_search_text = html.unescape(raw_text_payload)
+    post_ids = []
 
-    # ACCURATE PATH RESOLVER: Harvests the unique post ID tokens directly from both raw proxy paths and json feeds
-    post_ids = re.findall(r'/(?:comments|p)/([A-Za-z0-9]{4,12})', clean_search_text)
+    # UNIVERSAL PARSING INTERCEPT MAP:
+    if is_json_feed:
+        # If mirror responds with raw json data elements, unpack the data nodes natively
+        try:
+            json_payload = json.loads(raw_text_payload)
+            children = json_payload.get("data", {}).get("children", [])
+            for child in children:
+                pid = child.get("data", {}).get("id")
+                if pid:
+                    post_ids.append(pid)
+        except Exception as json_err:
+            print(f"Fallback to text regex due to JSON parse anomaly: {json_err}")
+    
+    # Text Regex extraction fallback for HTML layout proxy mirrors
     if not post_ids:
-        post_ids = re.findall(r'href="/r/IPTV_ZONENEW/(?:comments|p)?/?([A-Za-z0-9]{4,12})', clean_search_text)
-        
+        clean_search_text = html.unescape(raw_text_payload)
+        post_ids = re.findall(r'/(?:comments|p)/([A-Za-z0-9]{4,12})', clean_search_text)
+        if not post_ids:
+            post_ids = re.findall(r'href="/r/IPTV_ZONENEW/(?:comments|p)?/?([A-Za-z0-9]{4,12})', clean_search_text)
+
     post_ids = list(set([pid for pid in post_ids if pid not in ["search", "new", "hot", "top", "about", "styles"]]))
     
-    # Rebuild explicit direct URLs to navigate into each thread's separate deep text data
-    target_thread_urls = [f"{active_feed_base}/r/IPTV_ZONENEW/comments/{pid}/" for pid in post_ids]
+    # Rebuild explicit deep thread destination targets targeting Redlib structures
+    # Redlib threads must use /r/IPTV_ZONENEW/comments/id format or translate directly to old.reddit proxy maps
+    target_thread_urls = []
+    for pid in post_ids:
+        if "workers.dev" in active_feed_base:
+            # If the json feed endpoint was used, route comments deep fetching via a reliable HTML proxy mirror base instead
+            target_thread_urls.append(f"https://extranic.me/comments/{pid}/")
+        else:
+            target_thread_urls.append(f"{active_feed_base}/r/IPTV_ZONENEW/comments/{pid}/")
+
     print(f"Dynamic mapping analyzer successfully isolated {len(target_thread_urls)} individual thread targets to process.")
 
     # Step 2: Navigate inside each specific post link sequentially to scan the complete uncut body text
@@ -103,11 +129,7 @@ def main():
             continue
             
         clean_thread_html = html.unescape(t_html)
-        
-        # Strip structural HTML noise formatting elements to prevent broken or clipped base64 blocks
         text_without_html_tags = re.sub(r'<[^>]*>', ' ', clean_thread_html)
-        
-        # Universal lookahead regex scans strings for potential base64 layouts blocks
         potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', text_without_html_tags)
         
         for chunk_with_spaces in potential_blocks:
