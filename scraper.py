@@ -22,7 +22,7 @@ API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
 BASE_API_URL = os.environ.get("CF_BASE_API_URL")
 
 def loose_base64_decode(text_chunk):
-    # Strip any internal spacing or layout artifacts hidden inside code lines
+    # Completely strip spaces, newlines, and carriage returns that break base64 validation
     cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', text_chunk)
     if len(cleaned) < 16:
         return ""
@@ -90,9 +90,14 @@ def main():
     # Convert HTML-escaped encoding values natively back to clear text tags
     clean_html = html.unescape(raw_html)
 
-    # DYNAMIC REGEX FIX: Captures proxy post IDs whether they use /comments/, /p/, or raw paths
-    post_ids = re.findall(r'/r/IPTV_ZONENEW/(?:comments|p)?/?([A-Za-z0-9]{4,10})', clean_html)
-    post_ids = list(set([pid for pid in post_ids if pid not in ["search", "new", "hot", "top", "about"]]))
+    # GLOBAL PATH MATCH RESOLVER: Plucks out any thread token regardless of whether proxy uses /comments/ or /p/
+    post_ids = re.findall(r'/(?:comments|p)/([A-Za-z0-9]{4,12})', clean_html)
+    
+    # Fallback to scan raw layout links that omit the /p/ or /comments/ segment completely
+    if not post_ids:
+        post_ids = re.findall(r'href="/r/IPTV_ZONENEW/([A-Za-z0-9]{4,12})', clean_html)
+        
+    post_ids = list(set([pid for pid in post_ids if pid not in ["search", "new", "hot", "top", "about", "styles"]]))
 
     target_thread_urls = [f"{active_proxy}/r/IPTV_ZONENEW/comments/{pid}/" for pid in post_ids]
     print(f"Global layout analyzer successfully isolated {len(target_thread_urls)} active thread destinations to check.")
@@ -105,21 +110,19 @@ def main():
             if thread_res.status_code != 200:
                 continue
             
+            # Clean up page markers and strip inner HTML tags completely to reveal pristine raw strings
             thread_html = html.unescape(thread_res.text)
+            text_without_html_tags = re.sub(r'<[^>]*>', ' ', thread_html)
             
-            # Isolate the main layout footprint by screening common structural script noise tags
-            potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', thread_html)
+            # Extract potential blocks matching base64 length properties globally
+            potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', text_without_html_tags)
             
             for chunk_with_spaces in potential_blocks:
-                # Screen out structural HTML markers before parsing
-                if "class=" in chunk_with_spaces or "href=" in chunk_with_spaces or "<div" in chunk_with_spaces:
-                    continue
-                    
                 decoded = loose_base64_decode(chunk_with_spaces)
                 
                 # Check if the decoded block reveals any of our target links or domains
                 if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
-                    paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
+                    paste_links = re.findall(r'https?://?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co/[^\s\n\r"\'><]+', decoded)
                     
                     for paste_url in paste_links:
                         raw_url = paste_url.strip()
