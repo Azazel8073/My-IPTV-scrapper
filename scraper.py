@@ -10,10 +10,9 @@ CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_AC
 CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
-# FIXED: Hardcoded to bypass the workflow runner's broken environment injection block entirely
-CF_BASE_API_URL = "https://cloudflare.com"
+# Pulls cleanly from the YAML file update now
+CF_BASE_API_URL = os.environ.get("CF_BASE_API_URL", "https://cloudflare.com")
 
-# Standard Request Headers for downstream pastes
 PASTE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,text/plain,*/*"
@@ -21,18 +20,12 @@ PASTE_HEADERS = {
 
 
 def extract_credentials_from_text(text):
-    """
-    Extracts explicit M3U server connection links.
-    """
     pattern = r'https?://[A-Za-z0-9\.]+/get\.php\?username=[A-Za-z0-9_&\-=]+'
     found_links = re.findall(pattern, text)
     return [link.strip() for link in found_links]
 
 
 def extract_and_decode_base64(content_string):
-    """
-    Locates base64 segments within post fields, translates them, and processes downstream files.
-    """
     b64_pattern = r'[A-Za-z0-9+/]{16,}={0,2}'
     candidates = re.findall(b64_pattern, content_string)
     
@@ -72,10 +65,7 @@ def extract_and_decode_base64(content_string):
 
 
 def write_to_cloudflare_kv(key, value):
-    """
-    Updates the Cloudflare KV database directly via the core REST route structure.
-    """
-    url = f"https://cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/kv/namespaces/{CF_NAMESPACE_ID}/values/{key}"
+    url = f"{CF_BASE_API_URL}/client/v4/accounts/{CF_ACCOUNT_ID}/kv/namespaces/{CF_NAMESPACE_ID}/values/{key}"
     
     headers = {
         "Authorization": f"Bearer {CF_API_TOKEN}",
@@ -96,9 +86,6 @@ def write_to_cloudflare_kv(key, value):
 
 
 def get_reddit_json_via_anonymizer(target_url):
-    """
-    Bypasses datacenter 403 blocks by querying the data layer through a public CORS engine.
-    """
     encoded_target = urllib.parse.quote_plus(target_url)
     proxy_url = f"https://allorigins.win{encoded_target}"
     
@@ -121,10 +108,7 @@ def main():
         print("🔄 Pulling new master thread lists from open network bridge...")
         feed_data = get_reddit_json_via_anonymizer(target_main_feed)
         
-        # Accessing nested reddit data array
-        data_block = feed_data.get("data", {})
-        children = data_block.get("children", [])
-        
+        children = feed_data.get("data", {}).get("children", [])
         print(f"Successfully discovered {len(children)} active target threads.")
         print("Beginning credentials compilation phase...")
         print("===============================================")
@@ -148,9 +132,8 @@ def main():
                 comments_url = f"https://reddit.com{token}.json"
                 comments_data = get_reddit_json_via_anonymizer(comments_url)
                 
-                # Checking if comments array response structure matches list configuration
                 if isinstance(comments_data, list) and len(comments_data) > 1:
-                    comment_listings = comments_data.get(1, {}).get("data", {}).get("children", [])
+                    comment_listings = comments_data[1].get("data", {}).get("children", [])
                     for comment_node in comment_listings:
                         comment_body = comment_node.get("data", {}).get("body", "")
                         if comment_body:
