@@ -6,7 +6,7 @@ import html
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
-# Failover Proxy Pool targeting the pure unfiltered sub chronological feed
+# Robust Failover Proxy Pool to handle continuous network streaming
 PROXIES = [
     "https://extranic.me",
     "https://ducks.party",
@@ -53,7 +53,7 @@ def main():
         print("Error: CF_BASE_API_URL variable is missing in the workflow environment.")
         return
 
-    # Step 1: Connect to a working proxy node and pull the raw layout text stream
+    # Step 1: Query open proxy pool nodes to pull down the unfiltered main chronological feed HTML
     raw_html = ""
     active_proxy = ""
     for proxy_base in PROXIES:
@@ -86,13 +86,13 @@ def main():
     except Exception as e:
         print(f"KV initial loading skipped: {e}")
 
-    # Un-escape HTML markers globally across the raw data dump string
+    # Convert HTML-escaped encoding values natively back to clear text tags
     clean_html = html.unescape(raw_html)
 
-    # GLOBAL PATH EXTRACTOR: Captures every single comment thread path link on the page safely
+    # Scrape all unique comment paths from the proxy main page
     relative_post_paths = re.findall(r'href="(/r/IPTV_ZONENEW/comments/[^\s\n\r"\'><]+)"', clean_html)
     
-    # Clean paths from common trailing formatting query artifacts
+    # FIXED LOGIC: Clean paths safely using clear iterative string splits
     cleaned_paths = []
     for path in relative_post_paths:
         clean_p = path.split("?")[0].split("#")[0]
@@ -102,7 +102,7 @@ def main():
     target_thread_urls = [f"{active_proxy}{p}" for p in cleaned_paths]
     print(f"Global layout analyzer discovered {len(target_thread_urls)} active internal thread locations to check.")
 
-    # Step 2: Navigate inside each specific thread link sequentially to pull down the uncut body text
+    # Step 2: Navigate inside each specific post page link to process the uncut description copy blocks
     for thread_url in target_thread_urls:
         print(f"Opening thread context: {thread_url}")
         try:
@@ -112,13 +112,18 @@ def main():
             
             thread_html = html.unescape(thread_res.text)
             
-            # Pull out any alphanumeric continuous text strings matching base64 signatures globally
+            # FAST PRE-FILTER: Isolate text strings that match base64 properties length rules globally
             potential_blocks = re.findall(r'[A-Za-z0-9+/=]{24,}', thread_html)
             
             for base64_chunk in potential_blocks:
+                # Basic check to filter out obvious layout tags before decoding
+                if base64_chunk.lower().startswith("href") or base64_chunk.lower().startswith("class"):
+                    continue
+                    
                 decoded = loose_base64_decode(base64_chunk)
                 
-                if decoded and ("paste" in decoded or "get.php" in decoded):
+                # Check if the decoded block contains any of our target links or domains
+                if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
                     paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
                     
                     for paste_url in paste_links:
@@ -149,7 +154,7 @@ def main():
         except Exception as thread_err:
             print(f"   Skipped thread due to connection error: {thread_err}")
 
-    # Step 3: Synchronize aggregated configurations back to your account storage space
+    # Step 3: Synchronize updates back up to Cloudflare KV Namespace key
     if len(discovered_urls) > 0:
         compiled_dump = "\n".join(discovered_urls)
         try:
