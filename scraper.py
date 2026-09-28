@@ -6,7 +6,7 @@ import html
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
-# Failover Proxy Pool to ensure continuous network availability
+# Failover Proxy Pool targeting the pure unfiltered sub chronological feed
 PROXIES = [
     "https://extranic.me",
     "https://ducks.party",
@@ -44,7 +44,7 @@ def extract_credentials_from_bulk(text):
 
 def main():
     session = requests.Session()
-    retry_strategy = Retry(total=3, backoff_factor=1, status_forcelist=, raise_on_status=False)
+    retry_strategy = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504], raise_on_status=False)
     adapter = HTTPAdapter(max_retries=retry_strategy)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
@@ -53,25 +53,25 @@ def main():
         print("Error: CF_BASE_API_URL variable is missing in the workflow environment.")
         return
 
-    # Step 1: Download the main feed to uncover the real individual thread links
+    # Step 1: Connect to a working proxy node and pull the raw layout text stream
     raw_html = ""
     active_proxy = ""
     for proxy_base in PROXIES:
         front_page_target = f"{proxy_base}/r/IPTV_ZONENEW"
-        print(f"Connecting to proxy feed: {front_page_target}")
+        print(f"Connecting to raw front feed: {front_page_target}")
         try:
             headers = {"User-Agent": USER_AGENT, "Accept": "text/html"}
             res = session.get(front_page_target, headers=headers, timeout=15)
-            if res.status_code == 200 and "post_container" in res.text:
+            if res.status_code == 200 and "comments" in res.text:
                 raw_html = res.text
                 active_proxy = proxy_base
-                print(f"Connected to mirror node: {proxy_base}")
+                print(f"Success! Linked to proxy mirror node: {proxy_base}")
                 break
         except Exception:
             pass
 
     if not raw_html:
-        print("Error: Proxy pool exhausted or unreachable.")
+        print("Error: All fallback proxy servers in the pool are currently exhausted or throttled.")
         return
 
     discovered_urls = []
@@ -86,18 +86,25 @@ def main():
     except Exception as e:
         print(f"KV initial loading skipped: {e}")
 
+    # Un-escape HTML markers globally across the raw data dump string
     clean_html = html.unescape(raw_html)
 
-    # Scrape the unique direct comment page links from the proxy front feed page markup
+    # GLOBAL PATH EXTRACTOR: Captures every single comment thread path link on the page safely
     relative_post_paths = re.findall(r'href="(/r/IPTV_ZONENEW/comments/[^\s\n\r"\'><]+)"', clean_html)
     
-    # Deduplicate extracted paths
-    target_thread_urls = list(set([f"{active_proxy}{path}" for path in relative_post_paths]))
-    print(f"Successfully harvested {len(target_thread_urls)} direct internal post locations to check.")
+    # Clean paths from common trailing formatting query artifacts
+    cleaned_paths = []
+    for path in relative_post_paths:
+        clean_p = path.split("?")[0].split("#")[0]
+        if clean_p not in cleaned_paths:
+            cleaned_paths.append(clean_p)
 
-    # Step 2: Navigate inside each specific post link sequentially to scan the uncut text body
+    target_thread_urls = [f"{active_proxy}{p}" for p in cleaned_paths]
+    print(f"Global layout analyzer discovered {len(target_thread_urls)} active internal thread locations to check.")
+
+    # Step 2: Navigate inside each specific thread link sequentially to pull down the uncut body text
     for thread_url in target_thread_urls:
-        print(f"Opening full thread to prevent clipping: {thread_url}")
+        print(f"Opening thread context: {thread_url}")
         try:
             thread_res = session.get(thread_url, headers={"User-Agent": USER_AGENT}, timeout=12)
             if thread_res.status_code != 200:
@@ -105,7 +112,7 @@ def main():
             
             thread_html = html.unescape(thread_res.text)
             
-            # Isolate the post's main content wrapper element block
+            # Pull out any alphanumeric continuous text strings matching base64 signatures globally
             potential_blocks = re.findall(r'[A-Za-z0-9+/=]{24,}', thread_html)
             
             for base64_chunk in potential_blocks:
@@ -121,7 +128,7 @@ def main():
                         if "://pastebin.com" in raw_url and "/raw/" not in raw_url:
                             raw_url = raw_url.replace("://pastebin.com", "://pastebin.comraw/")
 
-                        print(f"   Found un-clipped paste vector: {raw_url}")
+                        print(f"   -> Isolated paste target destination: {raw_url}")
                         try:
                             paste_res = session.get(raw_url, headers={"User-Agent": USER_AGENT}, timeout=12)
                             if paste_res.status_code == 200:
@@ -129,15 +136,15 @@ def main():
                                 for target_link in parsed_links:
                                     if target_link not in discovered_urls:
                                         discovered_urls.append(target_link)
-                                        print(f"      [Appended Playlist Line]: {target_link}")
+                                        print(f"      [Successfully Appended]: {target_link}")
                         except Exception as p_err:
-                            print(f"      Failed downloading paste contents: {p_err}")
+                            print(f"      Failed loading contents: {p_err}")
 
                     direct_links = extract_credentials_from_bulk(decoded)
                     for d_link in direct_links:
                         if d_link not in discovered_urls:
                             discovered_urls.append(d_link)
-                            print(f"      [Appended Direct Playlist Line]: {d_link}")
+                            print(f"      [Successfully Appended Direct]: {d_link}")
 
         except Exception as thread_err:
             print(f"   Skipped thread due to connection error: {thread_err}")
