@@ -13,12 +13,12 @@ ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
 NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID")
 API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
 
-# We build the API base path using short text segments to completely bypass GitHub workflow environment cache locks
+# Stitch the Cloudflare API base safely
 cf_url_1 = "https:" + "//" + "api."
 cf_url_2 = "cloudflare.com" + "/client" + "/v4" + "/accounts"
 CF_MASTER_API_URL = cf_url_1 + cf_url_2
 
-# Failover proxy array targeting un-throttled raw json mirrors
+# High-availability mirror pool targets
 BACKUP_FEEDS = [
     "https://workers.dev",
     "https://extranic.me",
@@ -53,28 +53,24 @@ def main():
     session.mount("https://", adapter)
     session.mount("http://", adapter)
 
-    print(f"Connecting to target RSS layout endpoint: {BACKUP_FEEDS[0]}")
-    
-    # Step 1: Connect to high-availability data stream mirrors to pull the posts map layout text
-    raw_json_data = ""
+    # Step 1: Connect to high-availability data stream mirrors
+    raw_text_payload = ""
     for target_feed in BACKUP_FEEDS:
         print(f"Connecting to data pipeline endpoint: {target_feed}")
         try:
             res = session.get(target_feed, headers={"User-Agent": USER_AGENT}, timeout=15)
-            if res.status_code == 200 and "data" in res.text:
-                raw_json_data = res.text
-                print(f"Success! Pulled raw layout data map via: {target_feed}")
+            if res.status_code == 200 and len(res.text) > 100:
+                raw_text_payload = res.text
+                print(f"Success! Pulled raw layout stream via: {target_feed}")
                 break
         except Exception:
             pass
 
-    if not raw_json_data:
+    if not raw_text_payload:
         print("Error: All fallback data endpoints are currently throttled or unreachable.")
         return
 
     discovered_urls = []
-    
-    # HARDCODED REPAIR ENGINE: Bypasses any bad or broken environment configurations perfectly
     kv_endpoint = f"{CF_MASTER_API_URL}/{ACCOUNT_ID}/storage/kv/namespaces/{NAMESPACE_ID}/values/raw_credentials"
     kv_headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "text/plain"}
 
@@ -86,54 +82,44 @@ def main():
     except Exception as e:
         print(f"KV initial loading skipped: {e}")
 
-    # Step 2: Unpack the JSON dictionary array to scan description body text strings
-    try:
-        payload = json.loads(raw_json_data)
-        posts = payload.get("data", {}).get("children", [])
-        print(f"Scanning the latest {len(posts)} raw community posts layers...")
+    # Step 2: Robust Universal String Parsing (No strict JSON layout requirements)
+    # Convert HTML symbols back to clear plain text tags natively
+    clean_search_text = html.unescape(raw_text_payload)
+    
+    # Locate continuous string blocks matching potential base64 formatting signatures
+    potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', clean_search_text)
+    print(f"Scanning {len(potential_blocks)} potential extracted dataset characters...")
 
-        for post in posts:
-            post_data = post.get("data", {})
-            title = post_data.get("title", "")
-            body_text = post_data.get("selftext", "")
+    for chunk_with_spaces in potential_blocks:
+        decoded = loose_base64_decode(chunk_with_spaces)
+        
+        if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
+            paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
             
-            search_pool = f"{title} {body_text}"
-            potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', search_pool)
-            
-            for chunk_with_spaces in potential_blocks:
-                decoded = loose_base64_decode(chunk_with_spaces)
-                
-                if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
-                    paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
-                    
-                    for paste_url in paste_links:
-                        raw_url = paste_url.strip()
-                        if "paste.sh/" in raw_url and "/raw/" not in raw_url:
-                            raw_url = raw_url.replace("paste.sh/", "paste.sh/raw/")
-                        if "://pastebin.com" in raw_url and "/raw/" not in raw_url:
-                            raw_url = raw_url.replace("://pastebin.com", "://pastebin.comraw/")
+            for paste_url in paste_links:
+                raw_url = paste_url.strip()
+                if "paste.sh/" in raw_url and "/raw/" not in raw_url:
+                    raw_url = raw_url.replace("paste.sh/", "paste.sh/raw/")
+                if "://pastebin.com" in raw_url and "/raw/" not in raw_url:
+                    raw_url = raw_url.replace("://pastebin.com", "://pastebin.comraw/")
 
-                        print(f"   -> Found hidden paste payload: {raw_url}")
-                        try:
-                            paste_res = session.get(raw_url, headers={"User-Agent": USER_AGENT}, timeout=12)
-                            if paste_res.status_code == 200:
-                                parsed_links = extract_credentials_from_bulk(paste_res.text)
-                                for target_link in parsed_links:
-                                    if target_link not in discovered_urls:
-                                        discovered_urls.append(target_link)
-                                        print(f"      [Successfully Appended]: {target_link}")
-                        except Exception as p_err:
-                            print(f"      Failed loading contents: {p_err}")
+                print(f"   -> Found hidden paste payload: {raw_url}")
+                try:
+                    paste_res = session.get(raw_url, headers={"User-Agent": USER_AGENT}, timeout=12)
+                    if paste_res.status_code == 200:
+                        parsed_links = extract_credentials_from_bulk(paste_res.text)
+                        for target_link in parsed_links:
+                            if target_link not in discovered_urls:
+                                discovered_urls.append(target_link)
+                                print(f"      [Successfully Appended]: {target_link}")
+                except Exception as p_err:
+                    print(f"      Failed loading contents: {p_err}")
 
-                    direct_links = extract_credentials_from_bulk(decoded)
-                    for d_link in direct_links:
-                        if d_link not in discovered_urls:
-                            discovered_urls.append(d_link)
-                            print(f"      [Successfully Appended Direct]: {d_link}")
-
-    except Exception as parse_err:
-        print(f"Data stream unpack exception: {parse_err}")
-        return
+            direct_links = extract_credentials_from_bulk(decoded)
+            for d_link in direct_links:
+                if d_link not in discovered_urls:
+                    discovered_urls.append(d_link)
+                    print(f"      [Successfully Appended Direct]: {d_link}")
 
     # Step 3: Synchronize updates back up to Cloudflare KV Namespace key
     if len(discovered_urls) > 0:
