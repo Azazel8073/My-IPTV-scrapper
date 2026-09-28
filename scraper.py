@@ -4,6 +4,7 @@ import urllib.parse
 import re
 import base64
 import json
+import time  # Added to handle rate-limiting delays
 
 # --- CLOUDFLARE CONFIGURATION ---
 CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_ACCOUNT_ID", "your_account_id_here")
@@ -27,8 +28,6 @@ def extract_and_decode_base64(xml_text):
     """
     Scans the thread XML content for Base64 text blocks and decodes them.
     """
-    # Look for alphanumeric text strings typically found in post bodies
-    # Filtering for chunks between 16 and 500 characters to reduce XML tags overhead
     b64_pattern = r'[A-Za-z0-9+/]{16,}={0,2}'
     candidates = re.findall(b64_pattern, xml_text)
     
@@ -41,7 +40,6 @@ def extract_and_decode_base64(xml_text):
             decoded_bytes = base64.b64decode(candidate, validate=True)
             decoded_str = decoded_bytes.decode('utf-8', errors='strict')
             
-            # Ensure the output contains alphanumeric characters and isn't raw binary noise
             if any(char.isalnum() for char in decoded_str):
                 decoded_results.append((candidate, decoded_str))
         except Exception:
@@ -72,15 +70,38 @@ def write_to_cloudflare_kv(key, value):
     return False
 
 
+def fetch_with_retry(url, headers, max_retries=3, initial_delay=5):
+    """
+    Fetches a URL and handles HTTP 429 rate limits by waiting and retrying.
+    """
+    delay = initial_delay
+    for attempt in range(max_retries):
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            response = urllib.request.urlopen(req, timeout=15)
+            return response
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < max_retries - 1:
+                print(f"⚠️ Hit HTTP 429 Rate Limit. Backing off for {delay} seconds (Attempt {attempt + 1}/{max_retries})...")
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff
+                continue
+            else:
+                raise e
+        except Exception as e:
+            raise e
+
+
 def main():
     print("===============================================")
-    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v9.4")
+    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v9.5")
     print(f"Master Extraction Link: {p_url}")
     print("===============================================")
     
-    req = urllib.request.Request(p_url, headers=RSS_HEADERS, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=15) as response:
+        # Utilizing the new retry logic for the master RSS connection
+        response = fetch_with_retry(p_url, RSS_HEADERS)
+        with response:
             status = response.status
             if status != 200:
                 print(f"❌ Master tracking node dropped: HTTP {status}")
@@ -97,24 +118,20 @@ def main():
             print("===============================================")
 
             success_count = 0
-            # Testing the first 5 targets using the RSS pipeline to prevent 403 limits
             for i, token in enumerate(unique_tokens[:5]):
                 
-                # 🔄 MODIFICATION: We append '.rss' and utilize the RSS_HEADERS schema to bypass the 403 anti-scraping blocks
                 thread_rss_url = "https" + ":" + "/" + "/" + "www" + "." + "reddit" + ".com" + "/r" + "/" + "IPTV_ZONENEW" + "/comments" + "/" + token + "/" + ".rss"
                 
                 print(f"[{i+1}/5] Fetching thread feed safely via RSS: {thread_rss_url}")
                 
-                t_req = urllib.request.Request(thread_rss_url, headers=RSS_HEADERS, method="GET")
                 try:
-                    with urllib.request.urlopen(t_req, timeout=12) as t_res:
+                    # Also utilize retry handling for individual threads to manage traffic gracefully
+                    t_res = fetch_with_retry(thread_rss_url, RSS_HEADERS)
+                    with t_res:
                         if t_res.status == 200:
                             print(f"    🎉 SUCCESS! Thread XML payload successfully acquired. Status: {t_res.status}")
                             
-                            # Read XML data directly
                             thread_xml = t_res.read().decode('utf-8', errors='ignore')
-                            
-                            # Parse data out of the text elements
                             found_pairs = extract_and_decode_base64(thread_xml)
                             
                             if found_pairs:
