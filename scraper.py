@@ -1,12 +1,9 @@
 import os
 import urllib.request
 import urllib.parse
-import json
-import base64
 import re
 import html
 
-# Low-level system signature bypasses automated data center scraping firewalls
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
@@ -18,8 +15,14 @@ cf_p1 = "https:" + "//" + "api."
 cf_p2 = "cloudflare.com" + "/client" + "/v4" + "/accounts"
 CF_MASTER_API_URL = cf_p1 + cf_p2
 
+# High-availability data pipelines
+BACKUP_FEEDS = [
+    "https://workers.dev",
+    "https://extranic.me",
+    "https://opnxng.com"
+]
+
 def loose_base64_decode(text_chunk):
-    # Strip any hidden spacing artifacts completely before decoding
     cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', text_chunk)
     if len(cleaned) < 16:
         return ""
@@ -41,7 +44,6 @@ def extract_credentials_from_bulk(text):
     return found
 
 def make_api_request(url, headers, method="GET", data=None):
-    """Robust custom low-level fallback client pipeline to bypass network filters"""
     req = urllib.request.Request(url, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, data=data, timeout=15) as response:
@@ -50,20 +52,21 @@ def make_api_request(url, headers, method="GET", data=None):
         return 0, str(e)
 
 def main():
-    print("Connecting directly to raw Reddit API layout stream...")
-    # Appending .json to the feed forces Reddit to drop raw markdown configurations instantly
-    reddit_url = "https://reddit.com"
-    reddit_headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    
-    status, raw_json_data = make_api_request(reddit_url, reddit_headers)
-    if status != 200:
-        print(f"Reddit pipeline rejected request (HTTP {status}). Retrying via backup proxy mirror...")
-        # Fallback to un-throttled raw JSON cloud mirror instance if direct call blinks
-        backup_url = "https://workers.dev"
-        status, raw_json_data = make_api_request(backup_url, reddit_headers)
-        if status != 200:
-            print("Error: All primary and backup data streams are unreachable.")
-            return
+    # Step 1: Connect to high-availability data stream mirrors natively
+    raw_text_payload = ""
+    for target_feed in BACKUP_FEEDS:
+        print(f"Connecting to data pipeline endpoint: {target_feed}")
+        reddit_headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
+        status, text_response = make_api_request(target_feed, reddit_headers)
+        
+        if status == 200 and len(text_response) > 100:
+            raw_text_payload = text_response
+            print(f"Success! Pulled raw layout text stream via: {target_feed}")
+            break
+
+    if not raw_text_payload:
+        print("Error: All primary and fallback data streams are currently unreachable.")
+        return
 
     discovered_urls = []
     kv_endpoint = f"{CF_MASTER_API_URL}/{ACCOUNT_ID}/storage/kv/namespaces/{NAMESPACE_ID}/values/raw_credentials"
@@ -77,64 +80,46 @@ def main():
     else:
         print(f"Initial KV connection skipped or empty: {existing_kv_text}")
 
-    # Process and parse out the un-escaped raw text layers
-    try:
-        payload = json.loads(raw_json_data)
-        posts = payload.get("data", {}).get("children", [])
-        print(f"Successfully unpacked the latest {len(posts)} un-corrupted markdown post entries.")
+    # Step 2: Global String Parsing (Completely immune to JSON unpack crashes)
+    clean_search_text = html.unescape(raw_text_payload)
+    
+    # Locate continuous string blocks matching potential base64 formatting signatures
+    potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', clean_search_text)
+    print(f"Scanning {len(potential_blocks)} potential extracted dataset characters...")
 
-        for post in posts:
-            post_data = post.get("data", {})
-            title = post_data.get("title", "")
-            # selftext contains the authentic, raw unformatted post descriptions
-            body_text = post_data.get("selftext", "")
+    for chunk in potential_blocks:
+        decoded = loose_base64_decode(chunk)
+        
+        if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
+            paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
             
-            search_pool = f"{title} {body_text}"
-            
-            # Match any word blocks that fit Base64 string formatting rules
-            potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{16,}', search_pool)
-            
-            for chunk in potential_blocks:
-                decoded = loose_base64_decode(chunk)
+            for paste_url in paste_links:
+                raw_url = paste_url.strip()
+                if "paste.sh/" in raw_url and "/raw/" not in raw_url:
+                    raw_url = raw_url.replace("paste.sh/", "paste.sh/raw/")
+                if "://pastebin.com" in raw_url and "/raw/" not in raw_url:
+                    raw_url = raw_url.replace("://pastebin.com", "://pastebin.comraw/")
+
+                print(f"Found hidden paste URL: {raw_url}")
+                p_headers = {"User-Agent": USER_AGENT}
+                p_status, p_text = make_api_request(raw_url, p_headers)
                 
-                if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
-                    # Extract any paste links out of the pristine decrypted text block
-                    paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
-                    
-                    for paste_url in paste_links:
-                        raw_url = paste_url.strip()
-                        if "paste.sh/" in raw_url and "/raw/" not in raw_url:
-                            raw_url = raw_url.replace("paste.sh/", "paste.sh/raw/")
-                        if "://pastebin.com" in raw_url and "/raw/" not in raw_url:
-                            raw_url = raw_url.replace("://pastebin.com", "://pastebin.comraw/")
+                if p_status == 200:
+                    parsed_links = extract_credentials_from_bulk(p_text)
+                    for target_link in parsed_links:
+                        if target_link not in discovered_urls:
+                            discovered_urls.append(target_link)
+                            print(f"   [Appended New Key]: {target_link}")
 
-                        print(f"Found hidden paste URL: {raw_url}")
-                        p_headers = {"User-Agent": USER_AGENT}
-                        p_status, p_text = make_api_request(raw_url, p_headers)
-                        
-                        if p_status == 200:
-                            parsed_links = extract_credentials_from_bulk(p_text)
-                            for target_link in parsed_links:
-                                if target_link not in discovered_urls:
-                                    discovered_urls.append(target_link)
-                                    print(f"   [Appended New Key]: {target_link}")
-                        else:
-                            print(f"   Could not read paste contents: HTTP {p_status}")
-
-                    direct_links = extract_credentials_from_bulk(decoded)
-                    for d_link in direct_links:
-                        if d_link not in discovered_urls:
-                            discovered_urls.append(d_link)
-                            print(f"   [Appended New Direct Key]: {d_link}")
-
-    except Exception as parse_err:
-        print(f"Data stream text decode processing error: {parse_err}")
-        return
+            direct_links = extract_credentials_from_bulk(decoded)
+            for d_link in direct_links:
+                if d_link not in discovered_urls:
+                    discovered_urls.append(d_link)
+                    print(f"   [Appended New Direct Key]: {d_link}")
 
     # Step 3: Synchronize updates back up to Cloudflare KV Namespace key
     if len(discovered_urls) > 0:
         compiled_dump = "\n".join(discovered_urls)
-        # Convert string payload cleanly into binary formats for system transmission
         binary_data = compiled_dump.encode('utf-8')
         
         status, response_text = make_api_request(kv_endpoint, kv_headers, method="PUT", data=binary_data)
