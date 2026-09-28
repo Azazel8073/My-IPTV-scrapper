@@ -101,7 +101,7 @@ def get_reddit_json_via_anonymizer(target_url):
     Bypasses datacenter 403 blocks by querying the data layer through a public bridge with robust retry loops.
     """
     encoded_target = urllib.parse.quote_plus(target_url)
-    proxy_url = f"https://api.allorigins.win/get?url={encoded_target}"
+    proxy_url = f"https://codetabs.com/v1/proxy?quest={encoded_target}"
     
     for attempt in range(3):
         try:
