@@ -102,7 +102,7 @@ def get_reddit_json_via_anonymizer(target_url):
     """
     encoded_target = urllib.parse.quote_plus(target_url)
     # ✅ FIXED: Added correct query argument endpoints structure path definition to stop trailing slash mutations
-    proxy_url = f"https://allorigins.win{encoded_target}"
+    proxy_url = f"https://api.allorigins.winget?url={encoded_target}"
     
     req = urllib.request.Request(proxy_url, headers=PASTE_HEADERS, method="GET")
     with urllib.request.urlopen(req, timeout=15) as response:
@@ -124,7 +124,7 @@ def main():
     
     try:
         # ✅ FIXED: Set direct subreddit JSON metadata stream to collect data cleanly from the proxy
-        target_main_feed = "https://reddit.com"
+        target_main_feed = "https://reddit.com/r/IPTV_ZONENEW/new.json?limit=10"
         print("🔄 Requesting master channel registry data from proxy portal...")
         feed_data = get_reddit_json_via_anonymizer(target_main_feed)
         
@@ -153,7 +153,7 @@ def main():
             
             try:
                 # ✅ FIXED: Configured exact subreddit sub-route endpoints query strings for comment matrices
-                comments_url = f"https://reddit.com{token}.json"
+                comments_url = f"https://reddit.com/r/IPTV_ZONENEW/comments/{token}.json"
                 comments_data = get_reddit_json_via_anonymizer(comments_url)
                 
                 # Check for two-element list layouts common to Reddit comments
