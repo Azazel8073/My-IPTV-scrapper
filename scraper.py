@@ -15,12 +15,8 @@ cf_p1 = "https:" + "//" + "api."
 cf_p2 = "cloudflare.com" + "/client" + "/v4" + "/accounts"
 CF_MASTER_API_URL = cf_p1 + cf_p2
 
-# High-availability direct and mirror endpoints combined
-FEEDS = [
-    "https://workers.dev",
-    "https://extranic.me",
-    "https://opnxng.com"
-]
+# ⚠️ DIRECT TARGET CONFIGURATION LAYER: Hardcoded directly to today's active thread page text stream
+TARGET_THREAD_URL = "https://reddit.com"
 
 def loose_base64_decode(text_chunk):
     cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', text_chunk)
@@ -51,45 +47,40 @@ def make_api_request(url, headers, method="GET", data=None):
         return 0, str(e)
 
 def main():
-    print("Executing master string stream ingestion pipeline...")
+    print(f"Connecting directly to today's target thread path text layout stream: {TARGET_THREAD_URL}")
+    status, raw_text_response = make_api_request(TARGET_THREAD_URL, {"User-Agent": USER_AGENT, "Accept": "*/*"})
     
-    raw_stream = ""
-    for target_feed in FEEDS:
-        print(f"Ingesting raw data from endpoint: {target_feed}")
-        status, text_response = make_api_request(target_feed, {"User-Agent": USER_AGENT, "Accept": "*/*"})
-        if status == 200 and len(text_response) > 200:
-            raw_stream = text_response
-            print(f"Successfully loaded stream block via: {target_feed}")
-            break
-
-    if not raw_stream:
-        print("Error: All text ingestion feeds are currently unreachable.")
-        return
+    if status != 200:
+        print(f"Direct connection to Reddit thread failed with HTTP {status}. Trying direct mirror link...")
+        fallback_thread = "https://extranic.me"
+        status, raw_text_response = make_api_request(fallback_thread, {"User-Agent": USER_AGENT})
+        if status != 200:
+            print("Error: Could not reach today's thread copy text page data stream.")
+            return
 
     discovered_urls = []
     kv_endpoint = f"{CF_MASTER_API_URL}/{ACCOUNT_ID}/storage/kv/namespaces/{NAMESPACE_ID}/values/raw_credentials"
     kv_headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "text/plain"}
 
-    # Pull active data list from your Cloudflare account
+    # Pull active data list from your Cloudflare account database
     status, existing_kv_text = make_api_request(kv_endpoint, kv_headers)
     if status == 200:
         discovered_urls = [line.strip() for line in existing_kv_text.split("\n") if line.strip()]
         print(f"Loaded {len(discovered_urls)} active database lines from Cloudflare KV.")
 
     # Convert escaped symbols cleanly back to clean text strings
-    clean_text_pool = html.unescape(raw_stream).replace('\\/', '/').replace('\\"', '"')
+    clean_text_pool = html.unescape(raw_text_response).replace('\\/', '/').replace('\\"', '"')
 
-    # GLOBAL SEPARATOR: Extract every alphanumeric string matching a potential Base64 block format
-    potential_tokens = re.findall(r'[A-Za-z0-9+/=]{20,120}', clean_text_pool)
-    print(f"Ingested text layout pool. Analyzing {len(potential_tokens)} raw text tokens...")
+    # GLOBAL TOKEN EXTRACTOR: Scan today's thread content for any Base64 strings directly
+    potential_tokens = re.findall(r'[A-Za-z0-9+/=]{24,120}', clean_text_pool)
+    print(f"Ingested thread layout data copy. Checking {len(potential_tokens)} raw text tokens for active Base64...")
 
     for token in potential_tokens:
         decoded = loose_base64_decode(token)
         
-        # Check if the decrypted token reveals a target data link signature
+        # Check if the decrypted token reveals a target paste service signature
         if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
-            # Strip out the paste web paths cleanly
-            paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><\\]+', decoded)
+            paste_links = re.findall(r'https?://?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co/[^\s\n\r"\'><\\]+', decoded)
             
             for paste_url in paste_links:
                 raw_url = paste_url.strip()
@@ -98,20 +89,20 @@ def main():
                 if "://pastebin.com" in raw_url and "/raw/" not in raw_url:
                     raw_url = raw_url.replace("://pastebin.com", "://pastebin.comraw/")
 
-                print(f"Found active paste vector payload: {raw_url}")
+                print(f"Found active paste vector payload link: {raw_url}")
                 p_status, p_text = make_api_request(raw_url, {"User-Agent": USER_AGENT})
                 if p_status == 200:
                     parsed_links = extract_credentials_from_bulk(p_text)
                     for target_link in parsed_links:
                         if target_link not in discovered_urls:
                             discovered_urls.append(target_link)
-                            print(f"   [Successfully Aggregated]: {target_link}")
+                            print(f"   [Successfully Aggregated New Key]: {target_link}")
 
             direct_links = extract_credentials_from_bulk(decoded)
             for d_link in direct_links:
                 if d_link not in discovered_urls:
                     discovered_urls.append(d_link)
-                    print(f"   [Successfully Aggregated Direct]: {d_link}")
+                    print(f"   [Successfully Aggregated Direct New Key]: {d_link}")
 
     # Step 3: Synchronize updates back up to Cloudflare KV Namespace key
     if len(discovered_urls) > 0:
