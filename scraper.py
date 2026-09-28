@@ -12,7 +12,7 @@ CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("C
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
 # Force direct gateway to completely drop Cloudflare 301 loop errors
-CF_BASE_API_URL = "https://api.cloudflare.co"
+CF_BASE_API_URL = "https://api.cloudflare.com"
 
 # Generic request context headers for external paste crawling blocks
 PASTE_HEADERS = {
