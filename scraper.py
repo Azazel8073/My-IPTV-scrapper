@@ -6,7 +6,7 @@ import html
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
-# Failover Proxy Pool targeting the pure, unfiltered main chronological feed
+# Failover Proxy Pool to ensure continuous network availability
 PROXIES = [
     "https://extranic.me",
     "https://ducks.party",
@@ -44,7 +44,7 @@ def extract_credentials_from_bulk(text):
 
 def main():
     session = requests.Session()
-    retry_strategy = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504], raise_on_status=False)
+    retry_strategy = Retry(total=3, backoff_factor=1, status_forcelist=, raise_on_status=False)
     adapter = HTTPAdapter(max_retries=retry_strategy)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
@@ -53,17 +53,19 @@ def main():
         print("Error: CF_BASE_API_URL variable is missing in the workflow environment.")
         return
 
-    # 1. Grab the raw unfiltered sub front-page directly
+    # Step 1: Download the main feed to uncover the real individual thread links
     raw_html = ""
+    active_proxy = ""
     for proxy_base in PROXIES:
         front_page_target = f"{proxy_base}/r/IPTV_ZONENEW"
-        print(f"Connecting to raw front feed: {front_page_target}")
+        print(f"Connecting to proxy feed: {front_page_target}")
         try:
             headers = {"User-Agent": USER_AGENT, "Accept": "text/html"}
             res = session.get(front_page_target, headers=headers, timeout=15)
             if res.status_code == 200 and "post_container" in res.text:
                 raw_html = res.text
-                print(f"Success! Pulled raw layout stream from: {proxy_base}")
+                active_proxy = proxy_base
+                print(f"Connected to mirror node: {proxy_base}")
                 break
         except Exception:
             pass
@@ -84,53 +86,63 @@ def main():
     except Exception as e:
         print(f"KV initial loading skipped: {e}")
 
-    # Decode HTML-escaped proxy codes back to plain-text instantly
     clean_html = html.unescape(raw_html)
 
-    # Separate raw post cards inside the markup frame
-    post_containers = re.findall(r'<div class="post_container">.*?</div>\s*</div>\s*</div>', clean_html, re.DOTALL)
-    if not post_containers:
-        post_containers = re.findall(r'<div class="post.*?">.*?</div>\s*</div>', clean_html, re.DOTALL)
+    # Scrape the unique direct comment page links from the proxy front feed page markup
+    relative_post_paths = re.findall(r'href="(/r/IPTV_ZONENEW/comments/[^\s\n\r"\'><]+)"', clean_html)
+    
+    # Deduplicate extracted paths
+    target_thread_urls = list(set([f"{active_proxy}{path}" for path in relative_post_paths]))
+    print(f"Successfully harvested {len(target_thread_urls)} direct internal post locations to check.")
 
-    print(f"Parsing {len(post_containers)} recent community posts layout layers...")
-
-    for block in post_containers:
-        # Extract contiguous chunks matching potential base64 strings directly out of post body layers
-        potential_blocks = re.findall(r'[A-Za-z0-9+/=]{24,}', block)
-        
-        for base64_chunk in potential_blocks:
-            decoded = loose_base64_decode(base64_chunk)
+    # Step 2: Navigate inside each specific post link sequentially to scan the uncut text body
+    for thread_url in target_thread_urls:
+        print(f"Opening full thread to prevent clipping: {thread_url}")
+        try:
+            thread_res = session.get(thread_url, headers={"User-Agent": USER_AGENT}, timeout=12)
+            if thread_res.status_code != 200:
+                continue
             
-            # If the decoded string reveals any of our target paste targets
-            if decoded and ("paste" in decoded or "get.php" in decoded):
-                paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
+            thread_html = html.unescape(thread_res.text)
+            
+            # Isolate the post's main content wrapper element block
+            potential_blocks = re.findall(r'[A-Za-z0-9+/=]{24,}', thread_html)
+            
+            for base64_chunk in potential_blocks:
+                decoded = loose_base64_decode(base64_chunk)
                 
-                for paste_url in paste_links:
-                    raw_url = paste_url.strip()
-                    if "paste.sh/" in raw_url and "/raw/" not in raw_url:
-                        raw_url = raw_url.replace("paste.sh/", "paste.sh/raw/")
-                    if "://pastebin.com" in raw_url and "/raw/" not in raw_url:
-                        raw_url = raw_url.replace("://pastebin.com", "://pastebin.comraw/")
+                if decoded and ("paste" in decoded or "get.php" in decoded):
+                    paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
+                    
+                    for paste_url in paste_links:
+                        raw_url = paste_url.strip()
+                        if "paste.sh/" in raw_url and "/raw/" not in raw_url:
+                            raw_url = raw_url.replace("paste.sh/", "paste.sh/raw/")
+                        if "://pastebin.com" in raw_url and "/raw/" not in raw_url:
+                            raw_url = raw_url.replace("://pastebin.com", "://pastebin.comraw/")
 
-                    print(f"Targeting hidden payload URL link: {raw_url}")
-                    try:
-                        paste_res = session.get(raw_url, headers={"User-Agent": USER_AGENT}, timeout=12)
-                        if paste_res.status_code == 200:
-                            parsed_links = extract_credentials_from_bulk(paste_res.text)
-                            for target_link in parsed_links:
-                                if target_link not in discovered_urls:
-                                    discovered_urls.append(target_link)
-                                    print(f"   [Successfully Appended]: {target_link}")
-                    except Exception as p_err:
-                        print(f"Failed loading contents from paste destination: {p_err}")
+                        print(f"   Found un-clipped paste vector: {raw_url}")
+                        try:
+                            paste_res = session.get(raw_url, headers={"User-Agent": USER_AGENT}, timeout=12)
+                            if paste_res.status_code == 200:
+                                parsed_links = extract_credentials_from_bulk(paste_res.text)
+                                for target_link in parsed_links:
+                                    if target_link not in discovered_urls:
+                                        discovered_urls.append(target_link)
+                                        print(f"      [Appended Playlist Line]: {target_link}")
+                        except Exception as p_err:
+                            print(f"      Failed downloading paste contents: {p_err}")
 
-                direct_links = extract_credentials_from_bulk(decoded)
-                for d_link in direct_links:
-                    if d_link not in discovered_urls:
-                        discovered_urls.append(d_link)
-                        print(f"   [Successfully Appended Direct Link]: {d_link}")
+                    direct_links = extract_credentials_from_bulk(decoded)
+                    for d_link in direct_links:
+                        if d_link not in discovered_urls:
+                            discovered_urls.append(d_link)
+                            print(f"      [Appended Direct Playlist Line]: {d_link}")
 
-    # 3. Synchronize aggregated configurations back to your account storage space
+        except Exception as thread_err:
+            print(f"   Skipped thread due to connection error: {thread_err}")
+
+    # Step 3: Synchronize aggregated configurations back to your account storage space
     if len(discovered_urls) > 0:
         compiled_dump = "\n".join(discovered_urls)
         try:
