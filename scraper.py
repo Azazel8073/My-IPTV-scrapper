@@ -41,7 +41,7 @@ def main():
             for i, token in enumerate(unique_tokens[:5]):
                 
                 # ⚠️ EXPLICIT LINK BUILDER: Completely ignores the old domain and builds a fresh 'old.reddit' address path natively
-                old_reddit_url = "https" + ":" + "/" + "/" + "old" + "." + "reddit" + ".com" + "/r" + "/" + "IPTV_ZONENEW" + "/comments" + "/" + token + "/"
+                old_reddit_url = "https" + ":" + "/" + "/" + "reddit" + ".com" + "/r" + "/" + "IPTV_ZONENEW" + "/comments" + "/" + token + "/"
                 
                 print(f"[{i+1}/5] Deep navigating straight into thread: {old_reddit_url}")
                 
