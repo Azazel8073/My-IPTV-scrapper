@@ -9,17 +9,17 @@ BROWSER_HEADERS = {
     "Connection": "keep-alive"
 }
 
-# ⚠️ SUBREDDIT NAVIGATION STITCHING: Building our specific path map completely safely
+# ⚠️ HIGH-AVAILABILITY DOMAIN ENGINE: Swapping the host to a dedicated, open community mirror
 protocol = "https"
-domain = "opnxng.com"
+domain = "redlib.extranic.me"
 sub_path = "/r/IPTV_ZONENEW"
 
-# BoB joins them perfectly: https://://opnxng.com/r/IPTV_ZONENEW
+# Stitched cleanly with zero double-slash artifacts or formatting overlaps
 TARGET_SUBREDDIT_URL = protocol + "://" + domain + sub_path
 
 def main():
     print("===============================================")
-    print("🚀 BOB INITIALIZING SUBREDDIT NAV RUN v5.0")
+    print("🚀 BOB INITIALIZING SUBREDDIT NAV RUN v5.1")
     print(f"Targeting Subreddit Feed: {TARGET_SUBREDDIT_URL}")
     print("===============================================")
     
