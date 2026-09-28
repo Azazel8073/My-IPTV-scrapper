@@ -5,6 +5,7 @@ import json
 import base64
 import re
 import html
+import time
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
@@ -86,21 +87,44 @@ def main():
         print(f"Loaded {len(discovered_urls)} active database lines from Cloudflare KV.")
 
     post_ids = []
+    current_time = time.time()
+    one_day_seconds = 24 * 60 * 60
 
-    # UNIVERSAL PARSING INTERCEPT MAP:
+    # UNIVERSAL PARSING MAP (REPAIRED FOR FLAT & NESTED JSON ENGINES)
     if is_json_feed:
-        # If mirror responds with raw json data elements, unpack the data nodes natively
         try:
             json_payload = json.loads(raw_text_payload)
-            children = json_payload.get("data", {}).get("children", [])
-            for child in children:
-                pid = child.get("data", {}).get("id")
-                if pid:
-                    post_ids.append(pid)
+            
+            # Handle standard nested Reddit JSON format
+            if isinstance(json_payload, dict) and "data" in json_payload:
+                children = json_payload.get("data", {}).get("children", [])
+                for child in children:
+                    p_data = child.get("data", {})
+                    pid = p_data.get("id")
+                    created_utc = p_data.get("created_utc", 0)
+                    
+                    # ⚠️ STRICT AGE FILTER: Skip if the post is older than 24 hours
+                    if current_time - created_utc > one_day_seconds:
+                        continue
+                    if pid:
+                        post_ids.append(pid)
+                        
+            # Handle flat mirror array formats directly
+            elif isinstance(json_payload, list):
+                for post in json_payload:
+                    pid = post.get("id")
+                    created_utc = post.get("created_utc", 0)
+                    
+                    # ⚠️ STRICT AGE FILTER: Skip if the post is older than 24 hours
+                    if current_time - created_utc > one_day_seconds:
+                        continue
+                    if pid:
+                        post_ids.append(pid)
+                        
         except Exception as json_err:
             print(f"Fallback to text regex due to JSON parse anomaly: {json_err}")
     
-    # Text Regex extraction fallback for HTML layout proxy mirrors
+    # Text Regex extraction fallback for HTML layout proxies (e.g. Redlib)
     if not post_ids:
         clean_search_text = html.unescape(raw_text_payload)
         post_ids = re.findall(r'/(?:comments|p)/([A-Za-z0-9]{4,12})', clean_search_text)
@@ -109,12 +133,11 @@ def main():
 
     post_ids = list(set([pid for pid in post_ids if pid not in ["search", "new", "hot", "top", "about", "styles"]]))
     
-    # Rebuild explicit deep thread destination targets targeting Redlib structures
-    # Redlib threads must use /r/IPTV_ZONENEW/comments/id format or translate directly to old.reddit proxy maps
+    # Rebuild explicit deep thread destination targets
     target_thread_urls = []
     for pid in post_ids:
         if "workers.dev" in active_feed_base:
-            # If the json feed endpoint was used, route comments deep fetching via a reliable HTML proxy mirror base instead
+            # Route deep fetching through a reliable HTML proxy mirror base instead of the flat json worker
             target_thread_urls.append(f"https://extranic.me/comments/{pid}/")
         else:
             target_thread_urls.append(f"{active_feed_base}/r/IPTV_ZONENEW/comments/{pid}/")
