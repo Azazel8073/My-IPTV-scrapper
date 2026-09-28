@@ -11,16 +11,16 @@ CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_AC
 CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
-# Read the base URL directly from your pipeline configuration variables
-raw_api_url = os.environ.get("CF_BASE_API_URL", "https://cloudflare.com").strip().rstrip('/')
+# Read the raw environment string and thoroughly strip whitespace characters/newlines
+raw_api_url = os.environ.get("CF_BASE_API_URL", "https://cloudflare.com").strip()
 
-# 🛠️ AUTOMATIC REDIRECT MITIGATION:
-# If the pipeline passes the root apex domain (https://cloudflare.com), natively correct it 
-# to the official REST API gateway subdomain to permanently eliminate the 301 loop.
-if raw_api_url == "https://cloudflare.com":
+# 🛠️ ROBUST REDIRECT OVERRIDE:
+# Checks if the non-API endpoint is present inside the stripped variable string.
+# This forces the proper administrative subdomain to safely eliminate the HTTP 301 loop.
+if "https://cloudflare.com" in raw_api_url:
     CF_BASE_API_URL = "https://cloudflare.com"
 else:
-    CF_BASE_API_URL = raw_api_url
+    CF_BASE_API_URL = raw_api_url.rstrip('/')
 
 RSS_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; FeedFetcher-Google; +http://google.com)",
@@ -104,7 +104,7 @@ def fetch_with_retry(url, headers, max_retries=3, initial_delay=5):
 
 def main():
     print("===============================================")
-    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v9.7")
+    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v9.8")
     print(f"Master Extraction Link: {p_url}")
     print(f"Target KV API Gateway: {CF_BASE_API_URL}")
     print("===============================================")
