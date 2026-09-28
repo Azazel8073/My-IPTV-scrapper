@@ -22,6 +22,7 @@ API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
 BASE_API_URL = os.environ.get("CF_BASE_API_URL")
 
 def loose_base64_decode(text_chunk):
+    # Strip any internal spacing or layout artifacts hidden inside code lines
     cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', text_chunk)
     if len(cleaned) < 16:
         return ""
@@ -62,7 +63,7 @@ def main():
         try:
             headers = {"User-Agent": USER_AGENT, "Accept": "text/html"}
             res = session.get(front_page_target, headers=headers, timeout=15)
-            if res.status_code == 200 and "comments" in res.text:
+            if res.status_code == 200 and "IPTV_ZONENEW" in res.text:
                 raw_html = res.text
                 active_proxy = proxy_base
                 print(f"Success! Linked to proxy mirror node: {proxy_base}")
@@ -89,9 +90,9 @@ def main():
     # Convert HTML-escaped encoding values natively back to clear text tags
     clean_html = html.unescape(raw_html)
 
-    # FIXED LOGIC: Extract unique 6-character post ID tokens safely out of comment links
-    post_ids = re.findall(r'/r/IPTV_ZONENEW/comments/([A-Za-z0-9]{5,8})/', clean_html)
-    post_ids = list(set(post_ids)) # Deduplicate token list
+    # DYNAMIC REGEX FIX: Captures proxy post IDs whether they use /comments/, /p/, or raw paths
+    post_ids = re.findall(r'/r/IPTV_ZONENEW/(?:comments|p)?/?([A-Za-z0-9]{4,10})', clean_html)
+    post_ids = list(set([pid for pid in post_ids if pid not in ["search", "new", "hot", "top", "about"]]))
 
     target_thread_urls = [f"{active_proxy}/r/IPTV_ZONENEW/comments/{pid}/" for pid in post_ids]
     print(f"Global layout analyzer successfully isolated {len(target_thread_urls)} active thread destinations to check.")
@@ -106,14 +107,15 @@ def main():
             
             thread_html = html.unescape(thread_res.text)
             
-            # Isolate the main text layout footprint by screening common structural script noise tags
-            potential_blocks = re.findall(r'[A-Za-z0-9+/=]{24,}', thread_html)
+            # Isolate the main layout footprint by screening common structural script noise tags
+            potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', thread_html)
             
-            for base64_chunk in potential_blocks:
-                if base64_chunk.lower().startswith("href") or base64_chunk.lower().startswith("class"):
+            for chunk_with_spaces in potential_blocks:
+                # Screen out structural HTML markers before parsing
+                if "class=" in chunk_with_spaces or "href=" in chunk_with_spaces or "<div" in chunk_with_spaces:
                     continue
                     
-                decoded = loose_base64_decode(base64_chunk)
+                decoded = loose_base64_decode(chunk_with_spaces)
                 
                 # Check if the decoded block reveals any of our target links or domains
                 if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
