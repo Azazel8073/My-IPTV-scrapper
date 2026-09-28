@@ -11,10 +11,10 @@ CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_AC
 CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
-# Force proper administrative subdomain to resolve the HTTP 301 loop entirely
-raw_api_url = os.environ.get("CF_BASE_API_URL", "https://cloudflare.com").strip()
-if "https://cloudflare.com" in raw_api_url:
-    CF_BASE_API_URL = "https://cloudflare.com"
+# FIXED: Points directly to Cloudflare's official API gateway to bypass the HTTP 301 redirect completely
+raw_api_url = os.environ.get("CF_BASE_API_URL", "https://api.cloudflare.com").strip()
+if "https://cloudflare.com" in raw_api_url or raw_api_url == "https://cloudflare.com":
+    CF_BASE_API_URL = "https://api.cloudflare.com"
 else:
     CF_BASE_API_URL = raw_api_url.rstrip('/')
 
@@ -58,7 +58,7 @@ def extract_and_decode_base64(xml_text):
                 # Clean up wrapping spaces or brackets
                 cleaned_str = decoded_str.strip()
                 
-                # 🚀 DEEP CRAWLER EXTENSION: If the decoded Base64 text is a URL, follow it to get the raw data
+                # DEEP CRAWLER EXTENSION: If the decoded Base64 text is a URL, follow it to get the raw data
                 if cleaned_str.startswith("http://") or cleaned_str.startswith("https://"):
                     print(f"       🔗 Decoded text is a external link. Crawling target: {cleaned_str}")
                     try:
