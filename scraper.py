@@ -6,9 +6,12 @@ import base64
 import json
 
 # --- CLOUDFLARE CONFIGURATION ---
-CF_ACCOUNT_ID = os.environ.get("CF_ACCOUNT_ID", "your_account_id_here")
-CF_NAMESPACE_ID = os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
-CF_API_TOKEN = os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
+CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_ACCOUNT_ID", "your_account_id_here")
+CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
+CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
+
+# Pulls the active API endpoint address dynamically from your runner configuration environment
+CF_BASE_API_URL = os.environ.get("CF_BASE_API_URL", "https://cloudflare.com").rstrip('/')
 
 RSS_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; FeedFetcher-Google; +http://google.com)",
@@ -49,9 +52,9 @@ def extract_and_decode_base64(xml_text):
 
 def write_to_cloudflare_kv(key, value):
     """
-    Pushes data directly into your Cloudflare KV Namespace.
+    Pushes data directly into your Cloudflare KV Namespace using environment-aligned URLs.
     """
-    url = f"https://cloudflare.com{CF_ACCOUNT_ID}/storage/kv/namespaces/{CF_NAMESPACE_ID}/values/{key}"
+    url = f"{CF_BASE_API_URL}/client/v4/accounts/{CF_ACCOUNT_ID}/storage/kv/namespaces/{CF_NAMESPACE_ID}/values/{key}"
     
     headers = {
         "Authorization": f"Bearer {CF_API_TOKEN}",
