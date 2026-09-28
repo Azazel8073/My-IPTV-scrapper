@@ -4,17 +4,20 @@ import urllib.parse
 import re
 import base64
 import json
-import time
 
-# --- CLOUDFLARE CONFIGURATION ---
+# --- CONFIGURATION LOGIC ---
 CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_ACCOUNT_ID", "your_account_id_here")
 CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
-# Force direct gateway to completely drop Cloudflare 301 loop errors
+# Production API hostname route
 CF_BASE_API_URL = "https://api.cloudflare.com"
 
-# Generic request context headers for external paste crawling blocks
+# Crucial Custom User-Agent to bypass Reddit's 403 datacenter block
+REDDIT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 AggregatorScraper/1.0"
+}
+
 PASTE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,text/plain,*/*"
@@ -23,7 +26,7 @@ PASTE_HEADERS = {
 
 def extract_credentials_from_text(text):
     """
-    Extracts lines that fit the M3U server credential format.
+    Extracts explicit M3U server connection links.
     """
     pattern = r'https?://[A-Za-z0-9\.]+/get\.php\?username=[A-Za-z0-9_&\-=]+'
     found_links = re.findall(pattern, text)
@@ -32,7 +35,7 @@ def extract_credentials_from_text(text):
 
 def extract_and_decode_base64(content_string):
     """
-    Scans free text fields for Base64 blocks, decodes them, and resolves paste configurations.
+    Locates base64 segments within post fields, translates them, and processes the downstream files.
     """
     b64_pattern = r'[A-Za-z0-9+/]{16,}={0,2}'
     candidates = re.findall(b64_pattern, content_string)
@@ -48,10 +51,9 @@ def extract_and_decode_base64(content_string):
             
             if decoded_str.startswith("http://") or decoded_str.startswith("https://"):
                 if "paste.sh/" in decoded_str:
-                    decoded_str = decoded_str.split('#')[0]
-                    decoded_str = decoded_str.rstrip('/') + '/raw'
+                    decoded_str = decoded_str.split('#')[0].rstrip('/') + '/raw'
                 
-                print(f"       🔗 Crawling Target Data Endpoint: {decoded_str}")
+                print(f"       🔗 Pulling credentials from target paste provider: {decoded_str}")
                 try:
                     req = urllib.request.Request(decoded_str, headers=PASTE_HEADERS, method="GET")
                     with urllib.request.urlopen(req, timeout=10) as ext_res:
@@ -59,10 +61,10 @@ def extract_and_decode_base64(content_string):
                             raw_payload = ext_res.read().decode('utf-8', errors='ignore')
                             links = extract_credentials_from_text(raw_payload)
                             if links:
-                                print(f"          🎉 Extracted {len(links)} credential entries from link.")
+                                print(f"          🎉 Extracted {len(links)} lines successfully.")
                                 extracted_credentials.extend(links)
                 except Exception as crawl_err:
-                    print(f"          ❌ Data link extraction failed: {crawl_err}")
+                    print(f"          ❌ Paste link download error: {crawl_err}")
             else:
                 links = extract_credentials_from_text(decoded_str)
                 if links:
@@ -75,9 +77,8 @@ def extract_and_decode_base64(content_string):
 
 def write_to_cloudflare_kv(key, value):
     """
-    Pushes data directly into your Cloudflare KV Namespace.
+    Updates the Cloudflare KV database directly via the core REST route structure.
     """
-    # FIXED: Structurally aligned API endpoint routing URL path according to API reference
     url = f"{CF_BASE_API_URL}/client/v4/accounts/{CF_ACCOUNT_ID}/kv/namespaces/{CF_NAMESPACE_ID}/values/{key}"
     
     headers = {
@@ -92,98 +93,96 @@ def write_to_cloudflare_kv(key, value):
             if response.status in (200, 201):
                 return True
     except urllib.error.HTTPError as e:
-        print(f"    ❌ Cloudflare KV write failed for key {key}: HTTP Error {e.code}")
+        print(f"    ❌ Cloudflare KV API failure: HTTP Error {e.code}")
     except Exception as e:
-        print(f"    ⚠️ Cloudflare KV write failed for key {key}: {e}")
+        print(f"    ⚠️ Cloudflare KV write failed: {e}")
     return False
 
 
-def get_json_via_proxy(target_rss_url):
+def get_reddit_json(target_url):
     """
-    Fetches Reddit RSS feeds safely converted into structured JSON blocks using an open API proxy gateway.
+    Queries Reddit's native JSON endpoint securely with standard browser request contexts.
     """
-    encoded_url = urllib.parse.quote_plus(target_rss_url)
-    
-    # FIXED: Added correct query argument syntax separation to prevent nonnumeric port errors
-    proxy_gateway_url = f"https://rss2json.com{encoded_url}"
-    
-    req = urllib.request.Request(proxy_gateway_url, headers=PASTE_HEADERS, method="GET")
+    req = urllib.request.Request(target_url, headers=REDDIT_HEADERS, method="GET")
     with urllib.request.urlopen(req, timeout=15) as response:
         if response.status == 200:
             return json.loads(response.read().decode('utf-8'))
-    raise Exception(f"Proxy engine rejected operation with status: {response.status}")
+    raise Exception(f"Reddit data engine returned non-OK status: {response.status}")
 
 
 def main():
     print("===============================================")
-    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v10.3")
-    print("Target Channel: /r/IPTV_ZONENEW via RSS Proxy")
-    print(f"Target KV API Gateway: {CF_BASE_API_URL}")
+    print("🚀 INITIALIZING PIPELINE DISCOVERY ENGINE")
+    print("Target Channel: /r/IPTV_ZONENEW via Native Data Route")
     print("===============================================")
     
     try:
-        # FIXED: Targets the structured RSS endpoint directly instead of an raw unparseable HTML landing page
+        # Utilizing direct JSON parsing structures to completely bypass proxy dependence
         target_main_feed = "https://reddit.com"
-        print("🔄 Requesting master channel registry data from proxy portal...")
-        feed_data = get_json_via_proxy(target_main_feed)
+        print("🔄 Pulling new master thread lists from target subreddit...")
+        feed_data = get_reddit_json(target_main_feed)
         
-        items = feed_data.get("items", [])
-        print(f"Successfully discovered {len(items)} active target threads.")
+        children = feed_data.get("data", {}).get("children", [])
+        print(f"Successfully discovered {len(children)} active target threads.")
         print("Beginning credentials compilation phase...")
         print("===============================================")
 
         all_compiled_credentials = []
 
-        # Step 2: Loop through discovered threads and pull post inner content blocks
-        for i, item in enumerate(items[:5]):
-            thread_link = item.get("link", "")
-            # Extract out the comments token identifier
-            token_match = re.search(r'/comments/([A-Za-z0-9]{5,10})/', thread_link)
+        # Step 2: Loop through discovered threads and read descriptions
+        for i, post in enumerate(children):
+            post_data = post.get("data", {})
+            token = post_data.get("id", "")
+            title = post_data.get("title", "")
+            description_text = post_data.get("selftext", "")
             
-            if token_match:
-                token = token_match.group(1)
-                print(f"[{i+1}/5] Checking Thread [{token}] via data properties...")
-                
-                # Check text body fields directly supplied by the conversion layer
-                content_snippet = item.get("content", "") + " " + item.get("description", "")
-                
-                found_credentials = extract_and_decode_base64(content_snippet)
+            print(f"[{i+1}/{len(children)}] Processing Thread [{token}] - Title: {title[:30]}...")
+            
+            # Extract and decrypt from the text body field directly
+            if description_text:
+                found_credentials = extract_and_decode_base64(description_text)
                 if found_credentials:
                     all_compiled_credentials.extend(found_credentials)
-                    
-                # Fetch the thread's distinct feed directly via the proxy portal
-                try:
-                    thread_rss_url = f"https://reddit.com{token}/.rss"
-                    thread_data = get_json_via_proxy(thread_rss_url)
-                    for comment in thread_data.get("items", []):
-                        comment_text = comment.get("content", "") + " " + comment.get("description", "")
-                        comment_creds = extract_and_decode_base64(comment_text)
-                        if comment_creds:
-                            all_compiled_credentials.extend(comment_creds)
-                except Exception:
-                    # Skip secondary extraction failures gracefully if individual threads throw issues
-                    continue
+            
+            # Fetch corresponding comments for hidden updates
+            try:
+                comments_url = f"https://reddit.com{token}.json"
+                comments_data = get_reddit_json(comments_url)
+                
+                # Reddit comment responses return as a secondary index list object array
+                if isinstance(comments_data, list) and len(comments_data) > 1:
+                    comment_listings = comments_data[1].get("data", {}).get("children", [])
+                    for comment_node in comment_listings:
+                        comment_body = comment_node.get("data", {}).get("body", "")
+                        if comment_body:
+                            comment_creds = extract_and_decode_base64(comment_body)
+                            if comment_creds:
+                                all_compiled_credentials.extend(comment_creds)
+            except Exception as e:
+                print(f"      ⚠️ Comment pass skipped for thread {token}: {e}")
+                continue
 
         all_compiled_credentials = list(set(all_compiled_credentials))
 
         print("===============================================")
         if all_compiled_credentials:
-            print(f"Processing complete. Found {len(all_compiled_credentials)} total credentials.")
+            print(f"Processing complete. Found {len(all_compiled_credentials)} credentials strings.")
             final_kv_payload = "\n".join(all_compiled_credentials)
             
-            print("🔄 Syncing global aggregated data into [raw_credentials]...")
+            print("🔄 Syncing aggregated credentials database into Cloudflare [raw_credentials]...")
             if write_to_cloudflare_kv("raw_credentials", final_kv_payload):
-                print("✅ [raw_credentials] updated successfully!")
+                print("✅ Cloudflare KV target index updated successfully!")
             else:
-                print("❌ Failed to push update to [raw_credentials]")
+                print("❌ Failed to push payload update to KV database namespace.")
         else:
-            print("ℹ️ Finished pass. No new clean credential strings found.")
+            print("ℹ️ Scraping cycle complete. No active data strings located.")
         print("===============================================")
         return
 
-    except Exception as network_error:
-        print(f"❌ Traversal configuration engine failed: {network_error}")
+    except Exception as general_error:
+        print(f"❌ Execution stopped by pipeline failure: {general_error}")
         return
+
 
 if __name__ == "__main__":
     main()
