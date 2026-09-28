@@ -12,7 +12,7 @@ BROWSER_HEADERS = {
 
 # ⚠️ FIXED STITCHING: Bare text pieces to fully prevent formatting corruption
 protocol = "https"
-domain = "://opnxng.com"
+domain = "opnxng.com"
 
 # BoB builds the link with zero extra punctuation symbols in the code
 STATIC_TEST_URL = protocol + "://" + domain
