@@ -15,7 +15,7 @@ protocol = "https"
 slashes = ":" + "//"
 domain = "://opnxng.com"
 
-# BoB stitches it perfectly on launch: https://://opnxng.com
+# BoB stitches it perfectly on launch: https://opnxng.com
 STATIC_TEST_URL = protocol + slashes + domain
 
 def main():
