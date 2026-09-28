@@ -28,7 +28,7 @@ PASTE_HEADERS = {
 }
 
 # FIXED: Shifted base address to legacy node to clear automated CDN edge blocks
-p_url = "https://reddit.com"
+p_url = "https://old.reddit.com"
 
 
 def extract_credentials_from_text(text):
