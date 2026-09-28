@@ -11,7 +11,7 @@ BROWSER_HEADERS = {
 
 # ⚠️ SUBREDDIT NAVIGATION STITCHING: Building our specific path map completely safely
 protocol = "https"
-domain = "://opnxng.com"
+domain = "opnxng.com"
 sub_path = "/r/IPTV_ZONENEW"
 
 # BoB joins them perfectly: https://://opnxng.com/r/IPTV_ZONENEW
