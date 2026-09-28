@@ -102,7 +102,7 @@ def get_reddit_json_via_anonymizer(target_url):
     """
     encoded_target = urllib.parse.quote_plus(target_url)
     # ✅ FIXED: Added correct query argument endpoints structure path definition to stop trailing slash mutations
-    proxy_url = f"https://api.allorigins.winget?url={encoded_target}"
+    proxy_url = f"https://api.allorigins.win/get?url={encoded_target}"
     
     req = urllib.request.Request(proxy_url, headers=PASTE_HEADERS, method="GET")
     with urllib.request.urlopen(req, timeout=15) as response:
