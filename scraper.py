@@ -3,17 +3,23 @@ import requests
 import base64
 import re
 import html
-import subprocess
 import json
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
-USER_AGENT = "IPTV-Custom-Aggregator-Pipeline/5.0 (Linux; x64) GitHub-Runner-Instance"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
 NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID")
 API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
 BASE_API_URL = os.environ.get("CF_BASE_API_URL")
+
+# Failover proxy array targeting un-throttled raw json mirrors
+BACKUP_FEEDS = [
+    "https://workers.dev",
+    "https://extranic.me",
+    "https://opnxng.com"
+]
 
 def loose_base64_decode(text_chunk):
     cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', text_chunk)
@@ -38,33 +44,30 @@ def extract_credentials_from_bulk(text):
 
 def main():
     session = requests.Session()
-    retry_strategy = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504], raise_on_status=False)
+    retry_strategy = Retry(total=3, backoff_factor=1, status_forcelist=, raise_on_status=False)
     adapter = HTTPAdapter(max_retries=retry_strategy)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
 
-    if not BASE_API_URL:
-        print("Error: CF_BASE_API_URL variable is missing in the workflow environment.")
+    if not BASE_API_URL or "api.cloudflare" not in BASE_API_URL:
+        print(f"Error: CF_BASE_API_URL is misconfigured or pointing to bad path: {BASE_API_URL}")
         return
 
-    # Step 1: Direct JSON retrieval utilizing curl sub-processes to bypass rate throttles
-    print("Executing native data pipeline request directly to Reddit API layer...")
-    target_json_url = "https://reddit.com"
-    
+    # Step 1: Connect to high-availability data stream mirrors to pull the posts map layout text
     raw_json_data = ""
-    try:
-        # Command line curl completely avoids python connection fingerprint blocks
-        cmd = ["curl", "-s", "-A", USER_AGENT, target_json_url]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-        if result.returncode == 0 and "data" in result.stdout:
-            raw_json_data = result.stdout
-            print("Success! Downloaded authentic un-cached JSON text map.")
-    except Exception as cmd_err:
-        print(f"Shell pipeline command execution failed: {cmd_err}")
-        return
+    for target_feed in BACKUP_FEEDS:
+        print(f"Connecting to data pipeline endpoint: {target_feed}")
+        try:
+            res = session.get(target_feed, headers={"User-Agent": USER_AGENT}, timeout=15)
+            if res.status_code == 200 and "data" in res.text:
+                raw_json_data = res.text
+                print(f"Success! Pulled raw layout data map via: {target_feed}")
+                break
+        except Exception:
+            pass
 
     if not raw_json_data:
-        print("Error: Direct connection endpoint throttled or returned empty payload.")
+        print("Error: All fallback data endpoints are currently throttled or unreachable.")
         return
 
     discovered_urls = []
@@ -79,27 +82,23 @@ def main():
     except Exception as e:
         print(f"KV initial loading skipped: {e}")
 
-    # Step 2: Parse out json dictionary arrays to find the hidden base64 string dumps
+    # Step 2: Unpack the JSON dictionary array to scan description body text strings
     try:
         payload = json.loads(raw_json_data)
         posts = payload.get("data", {}).get("children", [])
-        print(f"Scanning the latest {len(posts)} raw community posts descriptions...")
+        print(f"Scanning the latest {len(posts)} raw community posts layers...")
 
         for post in posts:
             post_data = post.get("data", {})
             title = post_data.get("title", "")
             body_text = post_data.get("selftext", "")
             
-            # Extract content from both the title and text body components
             search_pool = f"{title} {body_text}"
-            
-            # Locate contiguous character chunks matching base64 properties length rules globally
             potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', search_pool)
             
             for chunk_with_spaces in potential_blocks:
                 decoded = loose_base64_decode(chunk_with_spaces)
                 
-                # Check if the decoded block contains any of our target links or domains
                 if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
                     paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
                     
@@ -129,7 +128,7 @@ def main():
                             print(f"      [Successfully Appended Direct]: {d_link}")
 
     except Exception as parse_err:
-        print(f"Data stream text unpack exception: {parse_err}")
+        print(f"Data stream unpack exception: {parse_err}")
         return
 
     # Step 3: Synchronize updates back up to Cloudflare KV Namespace key
