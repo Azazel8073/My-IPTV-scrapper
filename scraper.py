@@ -44,7 +44,8 @@ def extract_credentials_from_bulk(text):
 
 def main():
     session = requests.Session()
-    retry_strategy = Retry(total=3, backoff_factor=1, status_forcelist=, raise_on_status=False)
+    # FIXED LINE: Removed the broken empty status list comma artifact
+    retry_strategy = Retry(total=3, backoff_factor=1, raise_on_status=False)
     adapter = HTTPAdapter(max_retries=retry_strategy)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
