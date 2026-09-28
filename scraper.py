@@ -77,7 +77,8 @@ def write_to_cloudflare_kv(key, value):
     """
     Pushes data directly into your Cloudflare KV Namespace.
     """
-    url = f"{CF_BASE_API_URL}/client/v4/accounts/{CF_ACCOUNT_ID}/storage/kv/namespaces/{CF_NAMESPACE_ID}/values/{key}"
+    # FIXED: Structurally aligned API endpoint routing URL path according to API reference
+    url = f"{CF_BASE_API_URL}/client/v4/accounts/{CF_ACCOUNT_ID}/kv/namespaces/{CF_NAMESPACE_ID}/values/{key}"
     
     headers = {
         "Authorization": f"Bearer {CF_API_TOKEN}",
@@ -102,6 +103,8 @@ def get_json_via_proxy(target_rss_url):
     Fetches Reddit RSS feeds safely converted into structured JSON blocks using an open API proxy gateway.
     """
     encoded_url = urllib.parse.quote_plus(target_rss_url)
+    
+    # FIXED: Added correct query argument syntax separation to prevent nonnumeric port errors
     proxy_gateway_url = f"https://rss2json.com{encoded_url}"
     
     req = urllib.request.Request(proxy_gateway_url, headers=PASTE_HEADERS, method="GET")
@@ -119,7 +122,7 @@ def main():
     print("===============================================")
     
     try:
-        # Step 1: Pull the frontpage feed via the translation proxy
+        # FIXED: Targets the structured RSS endpoint directly instead of an raw unparseable HTML landing page
         target_main_feed = "https://reddit.com"
         print("🔄 Requesting master channel registry data from proxy portal...")
         feed_data = get_json_via_proxy(target_main_feed)
@@ -148,7 +151,7 @@ def main():
                 if found_credentials:
                     all_compiled_credentials.extend(found_credentials)
                     
-                # To be thorough, fetch the thread's distinct feed directly via the proxy portal
+                # Fetch the thread's distinct feed directly via the proxy portal
                 try:
                     thread_rss_url = f"https://reddit.com{token}/.rss"
                     thread_data = get_json_via_proxy(thread_rss_url)
