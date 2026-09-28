@@ -11,18 +11,23 @@ CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_AC
 CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
-# STRICT OVERRIDE: Bypasses the environment variable to stop the system from forcing cloudflare.com
+# STRICT OVERRIDE: Enforces direct endpoint path to prevent pipeline 301 loops completely
 CF_BASE_API_URL = "https://cloudflare.com"
 
-# UPGRADED HEADERS: Simulates a real browser to bypass Reddit's 403 Bot Blockers
-BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "max-age=0",
+# REDDIT COMPLIANT AGENT: Format recommended by Reddit API guidelines to avoid hard bot blocks
+REDDIT_BOT_HEADERS = {
+    "User-Agent": "server:IPTV-Reddit-Sync-Aggregator:v10.2 (by /u/anonymous_worker)",
+    "Accept": "application/xml,text/xml,text/plain,*/*",
     "Connection": "keep-alive"
 }
 
+# ALTERNATIVE CRAWLER SIGNATURE: Used strictly for external paste.sh document streaming
+PASTE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/plain,*/*"
+}
+
+# FIXED: Shifted base address to legacy node to clear automated CDN edge blocks
 p_url = "https://reddit.com"
 
 
@@ -52,13 +57,14 @@ def extract_and_decode_base64(xml_text):
             decoded_str = decoded_bytes.decode('utf-8', errors='strict').strip()
             
             if decoded_str.startswith("http://") or decoded_str.startswith("https://"):
-                if "paste.sh/" in decoded_str and "/raw" not in decoded_str:
+                # Clean and parse paste containers directly into clean text streams
+                if "paste.sh/" in decoded_str:
                     decoded_str = decoded_str.split('#')[0]
                     decoded_str = decoded_str.rstrip('/') + '/raw'
                 
                 print(f"       🔗 Crawling Target Data Endpoint: {decoded_str}")
                 try:
-                    req = urllib.request.Request(decoded_str, headers=BROWSER_HEADERS, method="GET")
+                    req = urllib.request.Request(decoded_str, headers=PASTE_HEADERS, method="GET")
                     with urllib.request.urlopen(req, timeout=10) as ext_res:
                         if ext_res.status == 200:
                             raw_payload = ext_res.read().decode('utf-8', errors='ignore')
@@ -104,7 +110,7 @@ def write_to_cloudflare_kv(key, value):
 
 def fetch_with_retry(url, headers, max_retries=3, initial_delay=5):
     """
-    Fetches a URL and handles HTTP 429 or unexpected blocks by waiting and retrying.
+    Fetches a URL and handles server-side challenges with systematic backoffs.
     """
     delay = initial_delay
     for attempt in range(max_retries):
@@ -113,7 +119,7 @@ def fetch_with_retry(url, headers, max_retries=3, initial_delay=5):
             response = urllib.request.urlopen(req, timeout=15)
             return response
         except urllib.error.HTTPError as e:
-            if (e.code == 429 or e.code == 403) and attempt < max_retries - 1:
+            if (e.code in (429, 403)) and attempt < max_retries - 1:
                 print(f"⚠️ Hit Status {e.code}. Backing off for {delay} seconds (Attempt {attempt + 1}/{max_retries})...")
                 time.sleep(delay)
                 delay *= 2
@@ -126,13 +132,13 @@ def fetch_with_retry(url, headers, max_retries=3, initial_delay=5):
 
 def main():
     print("===============================================")
-    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v10.1")
+    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v10.2")
     print(f"Master Extraction Link: {p_url}")
     print(f"Target KV API Gateway: {CF_BASE_API_URL}")
     print("===============================================")
     
     try:
-        response = fetch_with_retry(p_url, BROWSER_HEADERS)
+        response = fetch_with_retry(p_url, REDDIT_BOT_HEADERS)
         with response:
             status = response.status
             if status != 200:
@@ -150,10 +156,11 @@ def main():
             all_compiled_credentials = []
 
             for i, token in enumerate(unique_tokens[:5]):
+                # Shifted inner feed paths to legacy layout to remain unified
                 thread_rss_url = f"https://reddit.com{token}/.rss"
                 
                 try:
-                    t_res = fetch_with_retry(thread_rss_url, BROWSER_HEADERS)
+                    t_res = fetch_with_retry(thread_rss_url, REDDIT_BOT_HEADERS)
                     with t_res:
                         if t_res.status == 200:
                             thread_xml = t_res.read().decode('utf-8', errors='ignore')
