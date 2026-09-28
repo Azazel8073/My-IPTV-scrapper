@@ -9,13 +9,12 @@ RSS_HEADERS = {
     "Connection": "keep-alive"
 }
 
-# ⚠️ STITCHING ENGINE: Built using simple text pieces with zero hardcoded colons or slashes
-# Your phone browser clipboard can never create a double-slash artifact out of this structure!
+# The clean master feed link structure
 p_url = "https" + ":" + "/" + "/" + "www" + "." + "reddit" + ".com" + "/r" + "/" + "IPTV_ZONENEW" + "/new" + "/" + ".rss"
 
 def main():
     print("===============================================")
-    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v9.1")
+    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v9.2")
     print(f"Master Extraction Link: {p_url}")
     print("===============================================")
     
@@ -28,19 +27,21 @@ def main():
                 return
                 
             raw_xml_content = response.read().decode('utf-8', errors='ignore')
-            post_links = re.findall(r'href="(https?://www\.reddit\.com/r/IPTV_ZONENEW/comments/[^\s"\'><]+)"', raw_xml_content)
-            unique_post_links = list(set(post_links))
             
-            print(f"Successfully discovered {len(unique_post_links)} active target threads.")
+            # 🔍 ID EXTRACTOR: Isolate the unique 7-character post tokens directly out of the feed strings
+            post_tokens = re.findall(r'/comments/([A-Za-z0-9]{5,10})/', raw_xml_content)
+            unique_tokens = list(set(post_tokens))
+            
+            print(f"Successfully discovered {len(unique_tokens)} active target threads.")
             print("Beginning automated inner loop deep verification phase...")
             print("===============================================")
 
             success_count = 0
             # Sifting through the newest 5 targets to keep our connection test blazing fast
-            for i, target_link in enumerate(unique_post_links[:5]):
+            for i, token in enumerate(unique_tokens[:5]):
                 
-                # ⚠️ REPAIR REGEX SWAP: Explicitly strips 'www.' and injects 'old.' natively in the background
-                old_reddit_url = re.sub(r'https?://(www\.)?reddit\.com', 'https://reddit.com', target_link)
+                # ⚠️ EXPLICIT LINK BUILDER: Completely ignores the old domain and builds a fresh 'old.reddit' address path natively
+                old_reddit_url = "https" + ":" + "/" + "/" + "old" + "." + "reddit" + ".com" + "/r" + "/" + "IPTV_ZONENEW" + "/comments" + "/" + token + "/"
                 
                 print(f"[{i+1}/5] Deep navigating straight into thread: {old_reddit_url}")
                 
