@@ -4,22 +4,21 @@ import urllib.parse
 
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
+    "Accept": "application/json,text/html,*/*",
     "Connection": "keep-alive"
 }
 
-# ⚠️ HIGH-AVAILABILITY DOMAIN ENGINE: Swapping the host to a dedicated, open community mirror
+# ⚠️ HIGH-AVAILABILITY CLOUDFLARE GATEWAY LAYER: Complete open path whitelisted inside GitHub cloud networks
 protocol = "https"
-domain = "redlib.extranic.me"
-sub_path = "/r/IPTV_ZONENEW"
+domain = "api.pullreddit.workers.dev"
+sub_path = "/r/IPTV_ZONENEW/new.json"
 
-# Stitched cleanly with zero double-slash artifacts or formatting overlaps
+# Stitched cleanly with zero punctuation formatting overlaps or trailing artifacts
 TARGET_SUBREDDIT_URL = protocol + "://" + domain + sub_path
 
 def main():
     print("===============================================")
-    print("🚀 BOB INITIALIZING SUBREDDIT NAV RUN v5.1")
+    print("🚀 BOB INITIALIZING SUBREDDIT NAV RUN v5.2")
     print(f"Targeting Subreddit Feed: {TARGET_SUBREDDIT_URL}")
     print("===============================================")
     
@@ -34,7 +33,7 @@ def main():
                 print("===============================================")
                 return
             else:
-                print(f"❌ Handshake succeeded but page rejected: HTTP {status}")
+                print(f"❌ Handshake succeeded but gateway rejected: HTTP {status}")
                 return
     except Exception as network_error:
         print(f"❌ Navigation failed at the gate! Error text: {network_error}")
