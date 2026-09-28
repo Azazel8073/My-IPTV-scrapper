@@ -7,7 +7,8 @@ import re
 import html
 import time
 
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# Direct system agent signature safely handles public API gateway connections
+USER_AGENT = "IPTV-Custom-Aggregator-Pipeline/9.0 (Linux; x64) GitHub-Cloud-Runner"
 
 ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
 NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID")
@@ -16,13 +17,6 @@ API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
 cf_p1 = "https:" + "//" + "api."
 cf_p2 = "cloudflare.com" + "/client" + "/v4" + "/accounts"
 CF_MASTER_API_URL = cf_p1 + cf_p2
-
-# High-availability proxy pool targets to avoid reddit rate blocks
-BACKUP_FEEDS = [
-    "https://workers.dev",
-    "https://extranic.me",
-    "https://opnxng.com"
-]
 
 def loose_base64_decode(text_chunk):
     cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', text_chunk)
@@ -54,28 +48,19 @@ def make_api_request(url, headers, method="GET", data=None):
         return 0, str(e)
 
 def main():
-    # Step 1: Connect to high-availability data stream mirrors natively
-    raw_text_payload = ""
-    active_feed_base = ""
-    is_json_feed = False
+    print("Connecting directly to raw public API data stream...")
+    # Direct native endpoint completely removes the need for unstable proxy web addresses
+    target_feed = "https://reddit.com"
+    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     
-    for target_feed in BACKUP_FEEDS:
-        print(f"Connecting to data pipeline endpoint: {target_feed}")
-        reddit_headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
-        status, text_response = make_api_request(target_feed, reddit_headers)
-        
-        if status == 200 and len(text_response) > 100:
-            raw_text_payload = text_response
-            parsed_uri = urllib.parse.urlparse(target_feed)
-            active_feed_base = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
-            if target_feed.endswith(".json"):
-                is_json_feed = True
-            print(f"Success! Pulled raw layout text stream via: {target_feed}")
-            break
-
-    if not raw_text_payload:
-        print("Error: All primary and fallback data streams are currently unreachable.")
-        return
+    status, raw_text_payload = make_api_request(target_feed, headers)
+    if status != 200:
+        print(f"Primary API gateway choked (HTTP {status}). Retrying via backup mirror...")
+        fallback_feed = "https://workers.dev"
+        status, raw_text_payload = make_api_request(fallback_feed, headers)
+        if status != 200:
+            print("Error: All primary and backup data streams are unreachable.")
+            return
 
     discovered_urls = []
     kv_endpoint = f"{CF_MASTER_API_URL}/{ACCOUNT_ID}/storage/kv/namespaces/{NAMESPACE_ID}/values/raw_credentials"
@@ -87,79 +72,53 @@ def main():
         print(f"Loaded {len(discovered_urls)} active database lines from Cloudflare KV.")
 
     post_ids = []
+    target_threads_data = {}
     current_time = time.time()
     one_day_seconds = 24 * 60 * 60
 
-    # UNIVERSAL PARSING MAP (REPAIRED FOR FLAT & NESTED JSON ENGINES)
-    if is_json_feed:
-        try:
-            json_payload = json.loads(raw_text_payload)
-            
-            # Handle standard nested Reddit JSON format
-            if isinstance(json_payload, dict) and "data" in json_payload:
-                children = json_payload.get("data", {}).get("children", [])
-                for child in children:
-                    p_data = child.get("data", {})
-                    pid = p_data.get("id")
-                    created_utc = p_data.get("created_utc", 0)
-                    
-                    # ⚠️ STRICT AGE FILTER: Skip if the post is older than 24 hours
-                    if current_time - created_utc > one_day_seconds:
-                        continue
-                    if pid:
-                        post_ids.append(pid)
-                        
-            # Handle flat mirror array formats directly
-            elif isinstance(json_payload, list):
-                for post in json_payload:
-                    pid = post.get("id")
-                    created_utc = post.get("created_utc", 0)
-                    
-                    # ⚠️ STRICT AGE FILTER: Skip if the post is older than 24 hours
-                    if current_time - created_utc > one_day_seconds:
-                        continue
-                    if pid:
-                        post_ids.append(pid)
-                        
-        except Exception as json_err:
-            print(f"Fallback to text regex due to JSON parse anomaly: {json_err}")
-    
-    # Text Regex extraction fallback for HTML layout proxies (e.g. Redlib)
-    if not post_ids:
-        clean_search_text = html.unescape(raw_text_payload)
-        post_ids = re.findall(r'/(?:comments|p)/([A-Za-z0-9]{4,12})', clean_search_text)
-        if not post_ids:
-            post_ids = re.findall(r'href="/r/IPTV_ZONENEW/(?:comments|p)?/?([A-Za-z0-9]{4,12})', clean_search_text)
+    try:
+        json_payload = json.loads(raw_text_payload)
+        # Parse data whether it's wrapped in standard format or flat arrays
+        children = json_payload.get("data", {}).get("children", []) if isinstance(json_payload, dict) else json_payload
+        
+        if not isinstance(children, list):
+            children = []
 
-    post_ids = list(set([pid for pid in post_ids if pid not in ["search", "new", "hot", "top", "about", "styles"]]))
-    
-    # Rebuild explicit deep thread destination targets
-    target_thread_urls = []
+        for child in children:
+            p_data = child.get("data", {}) if "data" in child else child
+            pid = p_data.get("id")
+            title = p_data.get("title", "")
+            body_text = p_data.get("selftext", "")
+            created_utc = p_data.get("created_utc", 0)
+            
+            # ⚠️ STRICT AGE FILTER: Skip if the post is older than 24 hours
+            if current_time - created_utc > one_day_seconds:
+                continue
+                
+            if pid:
+                post_ids.append(pid)
+                # Store the uncut body markdown directly to avoid separate post page fetches
+                target_threads_data[pid] = f"{title} {body_text}"
+
+        print(f"Dynamic analyzer successfully isolated {len(post_ids)} active thread targets from the last 24 hours.")
+
+    except Exception as parse_err:
+        print(f"Data stream text unpack exception: {parse_err}")
+        return
+
+    # Step 2: Iterate directly through the un-clipped body data of today's active threads
     for pid in post_ids:
-        if "workers.dev" in active_feed_base:
-            # Route deep fetching through a reliable HTML proxy mirror base instead of the flat json worker
-            target_thread_urls.append(f"https://extranic.me/comments/{pid}/")
-        else:
-            target_thread_urls.append(f"{active_feed_base}/r/IPTV_ZONENEW/comments/{pid}/")
-
-    print(f"Dynamic mapping analyzer successfully isolated {len(target_thread_urls)} individual thread targets to process.")
-
-    # Step 2: Navigate inside each specific post link sequentially to scan the complete uncut body text
-    for thread_url in target_thread_urls:
-        print(f"Entering deep thread endpoint context: {thread_url}")
-        t_status, t_html = make_api_request(thread_url, {"User-Agent": USER_AGENT})
-        if t_status != 200:
-            continue
-            
-        clean_thread_html = html.unescape(t_html)
-        text_without_html_tags = re.sub(r'<[^>]*>', ' ', clean_thread_html)
-        potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', text_without_html_tags)
+        search_pool = target_threads_data.get(pid, "")
+        print(f"Processing un-clipped Markdown body content for post ID: {pid}")
+        
+        # Scan strings for potential base64 layouts blocks
+        potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', search_pool)
         
         for chunk_with_spaces in potential_blocks:
             decoded = loose_base64_decode(chunk_with_spaces)
             
             if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
-                paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
+                paste_links = re.findall(r'https?://?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co/[^\s\n\r"\'><]+', decoded)
                 
                 for paste_url in paste_links:
                     raw_url = paste_url.strip()
