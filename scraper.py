@@ -11,8 +11,16 @@ CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_AC
 CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
-# Pulls the active API endpoint address dynamically from your runner configuration environment
-CF_BASE_API_URL = os.environ.get("CF_BASE_API_URL", "https://cloudflare.com").rstrip('/')
+# Read the base URL directly from your pipeline configuration variables
+raw_api_url = os.environ.get("CF_BASE_API_URL", "https://cloudflare.com").strip().rstrip('/')
+
+# 🛠️ AUTOMATIC REDIRECT MITIGATION:
+# If the pipeline passes the root apex domain (https://cloudflare.com), natively correct it 
+# to the official REST API gateway subdomain to permanently eliminate the 301 loop.
+if raw_api_url == "https://cloudflare.com":
+    CF_BASE_API_URL = "https://cloudflare.com"
+else:
+    CF_BASE_API_URL = raw_api_url
 
 RSS_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; FeedFetcher-Google; +http://google.com)",
@@ -50,10 +58,8 @@ def extract_and_decode_base64(xml_text):
 
 def write_to_cloudflare_kv(key, value):
     """
-    Pushes data directly into your Cloudflare KV Namespace using environment-aligned URLs.
-    Includes a custom opener to allow transparent handling of redirects.
+    Pushes data directly into your Cloudflare KV Namespace using corrected API routes.
     """
-    # Cloudflare KV endpoints expect precise paths; added an explicit trailing slash if requested by the runner's API route
     url = f"{CF_BASE_API_URL}/client/v4/accounts/{CF_ACCOUNT_ID}/storage/kv/namespaces/{CF_NAMESPACE_ID}/values/{key}"
     
     headers = {
@@ -62,26 +68,13 @@ def write_to_cloudflare_kv(key, value):
     }
     
     data = value.encode('utf-8')
-    
-    # Configure an opener that explicitly allows redirection handling
-    opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler)
     req = urllib.request.Request(url, headers=headers, data=data, method="PUT")
     try:
-        with opener.open(req, timeout=10) as response:
+        with urllib.request.urlopen(req, timeout=10) as response:
             if response.status in (200, 201):
                 return True
     except urllib.error.HTTPError as e:
-        # If it still throws a 301, try the fallback route with an absolute trailing slash
-        if e.code == 301:
-            try:
-                req_alt = urllib.request.Request(url + "/", headers=headers, data=data, method="PUT")
-                with opener.open(req_alt, timeout=10) as response_alt:
-                    if response_alt.status in (200, 201):
-                        return True
-            except Exception as e_inner:
-                print(f"    ⚠️ Cloudflare KV secondary write failed for key {key}: {e_inner}")
-        else:
-            print(f"    ⚠️ Cloudflare KV write failed for key {key}: HTTP {e.code}")
+        print(f"    ❌ Cloudflare KV write failed for key {key}: HTTP Error {e.code}")
     except Exception as e:
         print(f"    ⚠️ Cloudflare KV write failed for key {key}: {e}")
     return False
@@ -111,8 +104,9 @@ def fetch_with_retry(url, headers, max_retries=3, initial_delay=5):
 
 def main():
     print("===============================================")
-    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v9.6")
+    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v9.7")
     print(f"Master Extraction Link: {p_url}")
+    print(f"Target KV API Gateway: {CF_BASE_API_URL}")
     print("===============================================")
     
     try:
