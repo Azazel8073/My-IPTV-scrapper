@@ -12,19 +12,17 @@ BROWSER_HEADERS = {
     "Connection": "keep-alive"
 }
 
-# ⚠️ STITCHING ENGINE: Broken into short words so your phone clipboard can never truncate it
-p1 = "https:" + "//" + "old."
-p2 = "reddit.com" + "/r" + "/"
-p3 = "IPTV" + "_ZONE" + "NEW" + "/"
-p4 = "comments" + "/" + "1wsajod" + "/"
+# ⚠️ BYPASS GATEWAY ENGINE: Routes through a high-availability mirror to slip past data center blocks
+p1 = "https:" + "//" + "://opnxng.com"
+p2 = "/r" + "/" + "IPTV" + "_ZONE" + "NEW" + "/"
+p3 = "comments" + "/" + "1wsajod" + "/"
 
-# Python joins them perfectly back into the unbroken link on launch
-TARGET_THREAD_URL = p1 + p2 + p3 + p4
+TARGET_THREAD_URL = p1 + p2 + p3
 
 def main():
     print("===============================================")
-    print("🚀 INITIALIZING HANDSHAKE STEP RUN v2.0")
-    print(f"Targeting: {TARGET_THREAD_URL}")
+    print("🚀 INITIALIZING HANDSHAKE STEP RUN v3.0")
+    print(f"Targeting Bridge: {TARGET_THREAD_URL}")
     print("===============================================")
     
     req = urllib.request.Request(TARGET_THREAD_URL, headers=BROWSER_HEADERS, method="GET")
@@ -36,6 +34,10 @@ def main():
                 print("🎉 HEALTHY CONNECTION HANDSHAKE ESTABLISHED WITH REDDIT!")
                 print(f"Response Code: HTTP {status}")
                 print("===============================================")
+                
+                # Check if we can read actual content text
+                sample = response.read(500).decode('utf-8', errors='ignore')
+                print(f"Handshake validated. Data read size: {len(sample)} bytes.")
                 return
             else:
                 print(f"❌ Connection initialized but handshake rejected: HTTP {status}")
