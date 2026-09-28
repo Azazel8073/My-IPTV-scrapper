@@ -4,6 +4,7 @@ import urllib.parse
 import re
 import base64
 import json
+import time
 
 # --- CONFIGURATION LOGIC ---
 CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_ACCOUNT_ID", "your_account_id_here")
@@ -11,7 +12,7 @@ CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("C
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
 # Production API Routing Subdomain from our workflow YAML file setup
-CF_BASE_API_URL = os.environ.get("CF_BASE_API_URL", "https://api.cloudflare.com")
+CF_BASE_API_URL = os.environ.get("CF_BASE_API_URL", "https://cloudflare.com")
 
 PASTE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -46,7 +47,6 @@ def extract_and_decode_base64(content_string):
             
             if decoded_str.startswith("http://") or decoded_str.startswith("https://"):
                 if "paste.sh/" in decoded_str:
-                    # Parse hash elements cleanly without breaking string parameters
                     url_base = decoded_str.split('#')[0]
                     decoded_str = url_base.rstrip('/') + '/raw'
                 
@@ -98,22 +98,26 @@ def write_to_cloudflare_kv(key, value):
 
 def get_reddit_json_via_anonymizer(target_url):
     """
-    Bypasses datacenter 403 blocks by querying the data layer through a public bridge.
+    Bypasses datacenter 403 blocks by querying the data layer through a public bridge with robust retry loops.
     """
     encoded_target = urllib.parse.quote_plus(target_url)
-    # ✅ FIXED: Added correct query argument endpoints structure path definition to stop trailing slash mutations
     proxy_url = f"https://api.allorigins.win/get?url={encoded_target}"
     
-    req = urllib.request.Request(proxy_url, headers=PASTE_HEADERS, method="GET")
-    with urllib.request.urlopen(req, timeout=15) as response:
-        if response.status == 200:
-            wrapper_data = json.loads(response.read().decode('utf-8'))
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(proxy_url, headers=PASTE_HEADERS, method="GET")
+            with urllib.request.urlopen(req, timeout=30) as response:
+                if response.status == 200:
+                    wrapper_data = json.loads(response.read().decode('utf-8'))
+                    contents = wrapper_data.get("contents")
+                    if isinstance(contents, str):
+                        return json.loads(contents)
+                    return contents
+        except Exception as e:
+            print(f"      ⚠️ Proxy link connection attempt {attempt + 1} lagged: {e}")
+            time.sleep(2)
             
-            contents = wrapper_data.get("contents")
-            if isinstance(contents, str):
-                return json.loads(contents)
-            return contents
-    raise Exception("Anonymizer engine returned non-OK response.")
+    raise Exception("Anonymizer proxy timed out completely after 3 retries.")
 
 
 def main():
@@ -123,7 +127,6 @@ def main():
     print("===============================================")
     
     try:
-        # ✅ FIXED: Set direct subreddit JSON metadata stream to collect data cleanly from the proxy
         target_main_feed = "https://reddit.com/r/IPTV_ZONENEW/new.json?limit=10"
         print("🔄 Requesting master channel registry data from proxy portal...")
         feed_data = get_reddit_json_via_anonymizer(target_main_feed)
@@ -152,11 +155,10 @@ def main():
                     all_compiled_credentials.extend(found_credentials)
             
             try:
-                # ✅ FIXED: Configured exact subreddit sub-route endpoints query strings for comment matrices
                 comments_url = f"https://reddit.com/r/IPTV_ZONENEW/comments/{token}.json"
                 comments_data = get_reddit_json_via_anonymizer(comments_url)
                 
-                # Check for two-element list layouts common to Reddit comments
+                # Check for two-element list layouts common to Reddit comment JSON arrays
                 if isinstance(comments_data, list) and len(comments_data) > 1:
                     comment_root = comments_data[1] if isinstance(comments_data, list) else {}
                     comment_listings = comment_root.get("data", {}).get("children", []) if isinstance(comment_root, dict) else []
