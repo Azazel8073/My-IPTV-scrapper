@@ -10,7 +10,7 @@ CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_AC
 CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
-# Pulls cleanly from the YAML file update now
+# Pulls cleanly from your fixed YAML file update
 CF_BASE_API_URL = os.environ.get("CF_BASE_API_URL", "https://cloudflare.com")
 
 PASTE_HEADERS = {
@@ -20,12 +20,18 @@ PASTE_HEADERS = {
 
 
 def extract_credentials_from_text(text):
+    """
+    Extracts explicit M3U server connection links.
+    """
     pattern = r'https?://[A-Za-z0-9\.]+/get\.php\?username=[A-Za-z0-9_&\-=]+'
     found_links = re.findall(pattern, text)
     return [link.strip() for link in found_links]
 
 
 def extract_and_decode_base64(content_string):
+    """
+    Locates base64 segments within post fields, translates them, and processes downstream files.
+    """
     b64_pattern = r'[A-Za-z0-9+/]{16,}={0,2}'
     candidates = re.findall(b64_pattern, content_string)
     
@@ -40,7 +46,7 @@ def extract_and_decode_base64(content_string):
             
             if decoded_str.startswith("http://") or decoded_str.startswith("https://"):
                 if "paste.sh/" in decoded_str:
-                    decoded_str = decoded_str.split('#').rstrip('/') + '/raw'
+                    decoded_str = decoded_str.split('#')[0].rstrip('/') + '/raw'
                 
                 print(f"       🔗 Pulling credentials from target paste provider: {decoded_str}")
                 try:
@@ -65,6 +71,9 @@ def extract_and_decode_base64(content_string):
 
 
 def write_to_cloudflare_kv(key, value):
+    """
+    Updates your Cloudflare KV namespace using your exact API configuration path.
+    """
     url = f"{CF_BASE_API_URL}/client/v4/accounts/{CF_ACCOUNT_ID}/kv/namespaces/{CF_NAMESPACE_ID}/values/{key}"
     
     headers = {
@@ -86,6 +95,10 @@ def write_to_cloudflare_kv(key, value):
 
 
 def get_reddit_json_via_anonymizer(target_url):
+    """
+    Bypasses datacenter 403 blocks by querying the data layer through a public bridge.
+    """
+    # Clean URL handling prevents the nonnumeric port bug completely
     encoded_target = urllib.parse.quote_plus(target_url)
     proxy_url = f"https://allorigins.win{encoded_target}"
     
@@ -94,7 +107,7 @@ def get_reddit_json_via_anonymizer(target_url):
         if response.status == 200:
             wrapper_data = json.loads(response.read().decode('utf-8'))
             return json.loads(wrapper_data.get("contents"))
-    raise Exception(f"Anonymizer engine returned non-OK response.")
+    raise Exception("Anonymizer engine returned non-OK response.")
 
 
 def main():
@@ -152,7 +165,7 @@ def main():
             final_kv_payload = "\n".join(all_compiled_credentials)
             
             print("🔄 Syncing aggregated credentials database into Cloudflare [raw_credentials]...")
-            if write_to_cloudflare_kv("raw_credentials", final_kv_payload):
+            if write_to_cloudflare_kv("raw_credentials", final_payload):
                 print("✅ Cloudflare KV target index updated successfully!")
             else:
                 print("❌ Failed to push payload update to KV database namespace.")
