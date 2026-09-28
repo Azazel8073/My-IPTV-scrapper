@@ -10,8 +10,8 @@ CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_AC
 CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
-# Pulls cleanly from your fixed YAML file update
-CF_BASE_API_URL = os.environ.get("CF_BASE_API_URL", "https://cloudflare.com")
+# Clean production routing string matching our YAML fix
+CF_BASE_API_URL = os.environ.get("CF_BASE_API_URL", "https://api.cloudflare.com")
 
 PASTE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -46,6 +46,7 @@ def extract_and_decode_base64(content_string):
             
             if decoded_str.startswith("http://") or decoded_str.startswith("https://"):
                 if "paste.sh/" in decoded_str:
+                    # Clean trailing parameters safely without crashing url split parsers
                     decoded_str = decoded_str.split('#')[0].rstrip('/') + '/raw'
                 
                 print(f"       🔗 Pulling credentials from target paste provider: {decoded_str}")
@@ -98,7 +99,7 @@ def get_reddit_json_via_anonymizer(target_url):
     """
     Bypasses datacenter 403 blocks by querying the data layer through a public bridge.
     """
-    # Clean URL handling prevents the nonnumeric port bug completely
+    # Using clean encoding format to completely insulate url parsing
     encoded_target = urllib.parse.quote_plus(target_url)
     proxy_url = f"https://allorigins.win{encoded_target}"
     
@@ -121,7 +122,10 @@ def main():
         print("🔄 Pulling new master thread lists from open network bridge...")
         feed_data = get_reddit_json_via_anonymizer(target_main_feed)
         
-        children = feed_data.get("data", {}).get("children", [])
+        # Safely capture nested json keys returned by AllOrigins wrapper objects
+        data_layer = feed_data.get("data", {}) if isinstance(feed_data, dict) else {}
+        children = data_layer.get("children", [])
+        
         print(f"Successfully discovered {len(children)} active target threads.")
         print("Beginning credentials compilation phase...")
         print("===============================================")
@@ -145,6 +149,7 @@ def main():
                 comments_url = f"https://reddit.com{token}.json"
                 comments_data = get_reddit_json_via_anonymizer(comments_url)
                 
+                # Verify standard comment schema array structure
                 if isinstance(comments_data, list) and len(comments_data) > 1:
                     comment_listings = comments_data[1].get("data", {}).get("children", [])
                     for comment_node in comment_listings:
@@ -165,7 +170,7 @@ def main():
             final_kv_payload = "\n".join(all_compiled_credentials)
             
             print("🔄 Syncing aggregated credentials database into Cloudflare [raw_credentials]...")
-            if write_to_cloudflare_kv("raw_credentials", final_payload):
+            if write_to_cloudflare_kv("raw_credentials", final_kv_payload):
                 print("✅ Cloudflare KV target index updated successfully!")
             else:
                 print("❌ Failed to push payload update to KV database namespace.")
