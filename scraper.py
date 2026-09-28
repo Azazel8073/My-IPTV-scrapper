@@ -11,7 +11,7 @@ RSS_HEADERS = {
 
 # ⚠️ DIRECT SUBREDDIT RSS ENDPOINT: Completely eliminates unstable, broken web mirrors
 protocol = "https"
-domain = "://reddit.com"
+domain = "reddit.com"
 sub_path = "/r/IPTV_ZONENEW/new/.rss"
 
 # Stitched cleanly with zero double-slash artifacts or formatting overlaps
