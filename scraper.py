@@ -11,16 +11,15 @@ CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_AC
 CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
-# Points directly to Cloudflare's official API gateway
-raw_api_url = os.environ.get("CF_BASE_API_URL", "https://cloudflare.com").strip()
-if "https://cloudflare.com" in raw_api_url or raw_api_url == "https://cloudflare.com":
-    CF_BASE_API_URL = "https://cloudflare.com"
-else:
-    CF_BASE_API_URL = raw_api_url.rstrip('/')
+# STRICT OVERRIDE: Bypasses the environment variable to stop the system from forcing cloudflare.com
+CF_BASE_API_URL = "https://cloudflare.com"
 
-RSS_HEADERS = {
+# UPGRADED HEADERS: Simulates a real browser to bypass Reddit's 403 Bot Blockers
+BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "max-age=0",
     "Connection": "keep-alive"
 }
 
@@ -31,7 +30,6 @@ def extract_credentials_from_text(text):
     """
     Extracts lines that fit the M3U server credential format.
     """
-    # Regex designed to catch target domain credential strings
     pattern = r'https?://[A-Za-z0-9\.]+/get\.php\?username=[A-Za-z0-9_&\-=]+'
     found_links = re.findall(pattern, text)
     return [link.strip() for link in found_links]
@@ -54,15 +52,13 @@ def extract_and_decode_base64(xml_text):
             decoded_str = decoded_bytes.decode('utf-8', errors='strict').strip()
             
             if decoded_str.startswith("http://") or decoded_str.startswith("https://"):
-                # Normalize paste.sh links to grab the RAW text stream rather than webpage HTML
                 if "paste.sh/" in decoded_str and "/raw" not in decoded_str:
-                    # Clean hash segments out if present
                     decoded_str = decoded_str.split('#')[0]
                     decoded_str = decoded_str.rstrip('/') + '/raw'
                 
                 print(f"       🔗 Crawling Target Data Endpoint: {decoded_str}")
                 try:
-                    req = urllib.request.Request(decoded_str, headers=RSS_HEADERS, method="GET")
+                    req = urllib.request.Request(decoded_str, headers=BROWSER_HEADERS, method="GET")
                     with urllib.request.urlopen(req, timeout=10) as ext_res:
                         if ext_res.status == 200:
                             raw_payload = ext_res.read().decode('utf-8', errors='ignore')
@@ -73,14 +69,13 @@ def extract_and_decode_base64(xml_text):
                 except Exception as crawl_err:
                     print(f"          ❌ Data link extraction failed: {crawl_err}")
             else:
-                # Direct check if base64 contained inline credentials
                 links = extract_credentials_from_text(decoded_str)
                 if links:
                     extracted_credentials.extend(links)
         except Exception:
             continue
             
-    return list(set(extracted_credentials)) # Keeps entries unique
+    return list(set(extracted_credentials))
 
 
 def write_to_cloudflare_kv(key, value):
@@ -109,7 +104,7 @@ def write_to_cloudflare_kv(key, value):
 
 def fetch_with_retry(url, headers, max_retries=3, initial_delay=5):
     """
-    Fetches a URL and handles HTTP 429 rate limits by waiting and retrying.
+    Fetches a URL and handles HTTP 429 or unexpected blocks by waiting and retrying.
     """
     delay = initial_delay
     for attempt in range(max_retries):
@@ -118,8 +113,8 @@ def fetch_with_retry(url, headers, max_retries=3, initial_delay=5):
             response = urllib.request.urlopen(req, timeout=15)
             return response
         except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < max_retries - 1:
-                print(f"⚠️ Hit HTTP 429 Rate Limit. Backing off for {delay} seconds (Attempt {attempt + 1}/{max_retries})...")
+            if (e.code == 429 or e.code == 403) and attempt < max_retries - 1:
+                print(f"⚠️ Hit Status {e.code}. Backing off for {delay} seconds (Attempt {attempt + 1}/{max_retries})...")
                 time.sleep(delay)
                 delay *= 2
                 continue
@@ -131,13 +126,13 @@ def fetch_with_retry(url, headers, max_retries=3, initial_delay=5):
 
 def main():
     print("===============================================")
-    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v10.0")
+    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v10.1")
     print(f"Master Extraction Link: {p_url}")
     print(f"Target KV API Gateway: {CF_BASE_API_URL}")
     print("===============================================")
     
     try:
-        response = fetch_with_retry(p_url, RSS_HEADERS)
+        response = fetch_with_retry(p_url, BROWSER_HEADERS)
         with response:
             status = response.status
             if status != 200:
@@ -158,7 +153,7 @@ def main():
                 thread_rss_url = f"https://reddit.com{token}/.rss"
                 
                 try:
-                    t_res = fetch_with_retry(thread_rss_url, RSS_HEADERS)
+                    t_res = fetch_with_retry(thread_rss_url, BROWSER_HEADERS)
                     with t_res:
                         if t_res.status == 200:
                             thread_xml = t_res.read().decode('utf-8', errors='ignore')
@@ -170,13 +165,11 @@ def main():
                 except Exception as t_err:
                     print(f"    ❌ Extraction sequence for thread [{token}] hit an error: {t_err}")
 
-            # De-duplicate total run list
             all_compiled_credentials = list(set(all_compiled_credentials))
 
             print("===============================================")
             if all_compiled_credentials:
                 print(f"Processing complete. Found {len(all_compiled_credentials)} total credentials.")
-                # Combine all credentials separated by newlines to form the final text payload
                 final_kv_payload = "\n".join(all_compiled_credentials)
                 
                 print("🔄 Syncing global aggregated data into [raw_credentials]...")
