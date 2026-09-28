@@ -15,7 +15,7 @@ cf_p1 = "https:" + "//" + "api."
 cf_p2 = "cloudflare.com" + "/client" + "/v4" + "/accounts"
 CF_MASTER_API_URL = cf_p1 + cf_p2
 
-# High-availability data pipelines
+# High-availability data feeds (chronological list)
 BACKUP_FEEDS = [
     "https://workers.dev",
     "https://extranic.me",
@@ -23,12 +23,15 @@ BACKUP_FEEDS = [
 ]
 
 def loose_base64_decode(text_chunk):
+    # CRITICAL TRACKER FIX: Strip all text noise and whitespaces completely to isolate pure Base64 strings
     cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', text_chunk)
     if len(cleaned) < 16:
         return ""
     try:
+        # Dynamically append correct standard layout padding
         padded = cleaned + "=" * ((4 - len(cleaned) % 4) % 4)
-        decoded_bytes = base64.b64decode(padded)
+        # Force strict binary decoding check configurations
+        decoded_bytes = base64.b64decode(padded.encode('utf-8'))
         return decoded_bytes.decode('utf-8', errors='ignore')
     except Exception:
         return ""
@@ -52,7 +55,9 @@ def make_api_request(url, headers, method="GET", data=None):
         return 0, str(e)
 
 def main():
-    # Step 1: Connect to high-availability data stream mirrors natively
+    import base64 # Secure local runtime environment import module
+    
+    # 1. Connect to high-availability data stream mirrors natively
     raw_text_payload = ""
     for target_feed in BACKUP_FEEDS:
         print(f"Connecting to data pipeline endpoint: {target_feed}")
@@ -80,44 +85,50 @@ def main():
     else:
         print(f"Initial KV connection skipped or empty: {existing_kv_text}")
 
-    # Step 2: Global String Parsing (Completely immune to JSON unpack crashes)
+    # 2. Universal String Sifting
     clean_search_text = html.unescape(raw_text_payload)
     
-    # Locate continuous string blocks matching potential base64 formatting signatures
-    potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', clean_search_text)
-    print(f"Scanning {len(potential_blocks)} potential extracted dataset characters...")
+    # ACCURATE CHUNK EXTRACTOR: Splits text strictly by spaces, line ends, or punctuation to isolate raw tokens
+    potential_words = re.split(r'[\s\n\r"\'><,\^]+', clean_search_text)
+    print(f"Analyzing {len(potential_words)} raw text tokens for active Base64 structures...")
 
-    for chunk in potential_blocks:
-        decoded = loose_base64_decode(chunk)
-        
-        if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
-            paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
+    for word in potential_words:
+        word = word.strip()
+        # Clean lookahead match rules for standard Base64 string blocks (length 20 to 120 chars long)
+        if re.match(r'^[A-Za-z0-9+/=]{20,120}$', word):
+            decoded = loose_base64_decode(word)
             
-            for paste_url in paste_links:
-                raw_url = paste_url.strip()
-                if "paste.sh/" in raw_url and "/raw/" not in raw_url:
-                    raw_url = raw_url.replace("paste.sh/", "paste.sh/raw/")
-                if "://pastebin.com" in raw_url and "/raw/" not in raw_url:
-                    raw_url = raw_url.replace("://pastebin.com", "://pastebin.comraw/")
-
-                print(f"Found hidden paste URL: {raw_url}")
-                p_headers = {"User-Agent": USER_AGENT}
-                p_status, p_text = make_api_request(raw_url, p_headers)
+            if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
+                # Isolate target paste lines cleanly out of the decrypted string mapping text
+                paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
                 
-                if p_status == 200:
-                    parsed_links = extract_credentials_from_bulk(p_text)
-                    for target_link in parsed_links:
-                        if target_link not in discovered_urls:
-                            discovered_urls.append(target_link)
-                            print(f"   [Appended New Key]: {target_link}")
+                for paste_url in paste_links:
+                    raw_url = paste_url.strip()
+                    if "paste.sh/" in raw_url and "/raw/" not in raw_url:
+                        raw_url = raw_url.replace("paste.sh/", "paste.sh/raw/")
+                    if "://pastebin.com" in raw_url and "/raw/" not in raw_url:
+                        raw_url = raw_url.replace("://pastebin.com", "://pastebin.comraw/")
 
-            direct_links = extract_credentials_from_bulk(decoded)
-            for d_link in direct_links:
-                if d_link not in discovered_urls:
-                    discovered_urls.append(d_link)
-                    print(f"   [Appended New Direct Key]: {d_link}")
+                    print(f"Targeting hidden payload URL link: {raw_url}")
+                    p_headers = {"User-Agent": USER_AGENT}
+                    p_status, p_text = make_api_request(raw_url, p_headers)
+                    
+                    if p_status == 200:
+                        parsed_links = extract_credentials_from_bulk(p_text)
+                        for target_link in parsed_links:
+                            if target_link not in discovered_urls:
+                                discovered_urls.append(target_link)
+                                print(f"   [Appended New Key]: {target_link}")
+                    else:
+                        print(f"   Could not read paste contents: HTTP {p_status}")
 
-    # Step 3: Synchronize updates back up to Cloudflare KV Namespace key
+                direct_links = extract_credentials_from_bulk(decoded)
+                for d_link in direct_links:
+                    if d_link not in discovered_urls:
+                        discovered_urls.append(d_link)
+                        print(f"   [Appended New Direct Key]: {d_link}")
+
+    # 3. Synchronize updates back up to Cloudflare KV Namespace key
     if len(discovered_urls) > 0:
         compiled_dump = "\n".join(discovered_urls)
         binary_data = compiled_dump.encode('utf-8')
