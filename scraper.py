@@ -11,7 +11,7 @@ RSS_HEADERS = {
 }
 
 # ⚠️ FULL LINK PIECES: Separated completely so your phone browser layout can never clip it
-p_url = "https" + "://" + "://reddit.com" + "/r/" + "IPTV_ZONENEW" + "/new/.rss"
+p_url = "https" + "://" + "reddit.com" + "/r/" + "IPTV_ZONENEW" + "/new/.rss"
 
 def main():
     print("===============================================")
