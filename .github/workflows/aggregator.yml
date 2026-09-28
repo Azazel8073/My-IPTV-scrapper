@@ -29,5 +29,5 @@ jobs:
           CLOUDFLARE_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_NAMESPACE_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           # ⚠️ CORRECTED FIXED ENDPOINT PATH (Do not alter this link string)
-          CF_BASE_API_URL: "https://cloudflare.com"
+          CF_BASE_API_URL: "https://api.cloudflare.com"
         run: python scraper.py
