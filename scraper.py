@@ -3,18 +3,12 @@ import requests
 import base64
 import re
 import html
+import subprocess
+import json
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
-# Robust Failover Proxy Pool to handle continuous network streaming
-PROXIES = [
-    "https://extranic.me",
-    "https://ducks.party",
-    "https://catsarch.com",
-    "https://opnxng.com"
-]
-
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+USER_AGENT = "IPTV-Custom-Aggregator-Pipeline/5.0 (Linux; x64) GitHub-Runner-Instance"
 
 ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
 NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID")
@@ -22,7 +16,6 @@ API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
 BASE_API_URL = os.environ.get("CF_BASE_API_URL")
 
 def loose_base64_decode(text_chunk):
-    # Completely strip spaces, newlines, and carriage returns that break base64 validation
     cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', text_chunk)
     if len(cleaned) < 16:
         return ""
@@ -54,25 +47,24 @@ def main():
         print("Error: CF_BASE_API_URL variable is missing in the workflow environment.")
         return
 
-    # Step 1: Connect to a working proxy node and pull the raw layout text stream
-    raw_html = ""
-    active_proxy = ""
-    for proxy_base in PROXIES:
-        front_page_target = f"{proxy_base}/r/IPTV_ZONENEW"
-        print(f"Connecting to raw front feed: {front_page_target}")
-        try:
-            headers = {"User-Agent": USER_AGENT, "Accept": "text/html"}
-            res = session.get(front_page_target, headers=headers, timeout=15)
-            if res.status_code == 200 and "IPTV_ZONENEW" in res.text:
-                raw_html = res.text
-                active_proxy = proxy_base
-                print(f"Success! Linked to proxy mirror node: {proxy_base}")
-                break
-        except Exception:
-            pass
+    # Step 1: Direct JSON retrieval utilizing curl sub-processes to bypass rate throttles
+    print("Executing native data pipeline request directly to Reddit API layer...")
+    target_json_url = "https://reddit.com"
+    
+    raw_json_data = ""
+    try:
+        # Command line curl completely avoids python connection fingerprint blocks
+        cmd = ["curl", "-s", "-A", USER_AGENT, target_json_url]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        if result.returncode == 0 and "data" in result.stdout:
+            raw_json_data = result.stdout
+            print("Success! Downloaded authentic un-cached JSON text map.")
+    except Exception as cmd_err:
+        print(f"Shell pipeline command execution failed: {cmd_err}")
+        return
 
-    if not raw_html:
-        print("Error: All fallback proxy servers in the pool are currently exhausted or throttled.")
+    if not raw_json_data:
+        print("Error: Direct connection endpoint throttled or returned empty payload.")
         return
 
     discovered_urls = []
@@ -87,42 +79,29 @@ def main():
     except Exception as e:
         print(f"KV initial loading skipped: {e}")
 
-    # Convert HTML-escaped encoding values natively back to clear text tags
-    clean_html = html.unescape(raw_html)
+    # Step 2: Parse out json dictionary arrays to find the hidden base64 string dumps
+    try:
+        payload = json.loads(raw_json_data)
+        posts = payload.get("data", {}).get("children", [])
+        print(f"Scanning the latest {len(posts)} raw community posts descriptions...")
 
-    # GLOBAL PATH MATCH RESOLVER: Plucks out any thread token regardless of whether proxy uses /comments/ or /p/
-    post_ids = re.findall(r'/(?:comments|p)/([A-Za-z0-9]{4,12})', clean_html)
-    
-    # Fallback to scan raw layout links that omit the /p/ or /comments/ segment completely
-    if not post_ids:
-        post_ids = re.findall(r'href="/r/IPTV_ZONENEW/([A-Za-z0-9]{4,12})', clean_html)
-        
-    post_ids = list(set([pid for pid in post_ids if pid not in ["search", "new", "hot", "top", "about", "styles"]]))
-
-    target_thread_urls = [f"{active_proxy}/r/IPTV_ZONENEW/comments/{pid}/" for pid in post_ids]
-    print(f"Global layout analyzer successfully isolated {len(target_thread_urls)} active thread destinations to check.")
-
-    # Step 2: Navigate inside each specific post page link to process the uncut description copy blocks
-    for thread_url in target_thread_urls:
-        print(f"Opening thread context: {thread_url}")
-        try:
-            thread_res = session.get(thread_url, headers={"User-Agent": USER_AGENT}, timeout=12)
-            if thread_res.status_code != 200:
-                continue
+        for post in posts:
+            post_data = post.get("data", {})
+            title = post_data.get("title", "")
+            body_text = post_data.get("selftext", "")
             
-            # Clean up page markers and strip inner HTML tags completely to reveal pristine raw strings
-            thread_html = html.unescape(thread_res.text)
-            text_without_html_tags = re.sub(r'<[^>]*>', ' ', thread_html)
+            # Extract content from both the title and text body components
+            search_pool = f"{title} {body_text}"
             
-            # Extract potential blocks matching base64 length properties globally
-            potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', text_without_html_tags)
+            # Locate contiguous character chunks matching base64 properties length rules globally
+            potential_blocks = re.findall(r'[A-Za-z0-9+/=\s\n\r]{24,}', search_pool)
             
             for chunk_with_spaces in potential_blocks:
                 decoded = loose_base64_decode(chunk_with_spaces)
                 
-                # Check if the decoded block reveals any of our target links or domains
+                # Check if the decoded block contains any of our target links or domains
                 if decoded and ("paste" in decoded or "get.php" in decoded or "http" in decoded):
-                    paste_links = re.findall(r'https?://?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co/[^\s\n\r"\'><]+', decoded)
+                    paste_links = re.findall(r'https?://(?:paste\.sh|pastebin\.com|controlc\.com|rentry\.co)/[^\s\n\r"\'><]+', decoded)
                     
                     for paste_url in paste_links:
                         raw_url = paste_url.strip()
@@ -131,7 +110,7 @@ def main():
                         if "://pastebin.com" in raw_url and "/raw/" not in raw_url:
                             raw_url = raw_url.replace("://pastebin.com", "://pastebin.comraw/")
 
-                        print(f"   -> Isolated paste target destination: {raw_url}")
+                        print(f"   -> Found hidden paste payload: {raw_url}")
                         try:
                             paste_res = session.get(raw_url, headers={"User-Agent": USER_AGENT}, timeout=12)
                             if paste_res.status_code == 200:
@@ -149,8 +128,9 @@ def main():
                             discovered_urls.append(d_link)
                             print(f"      [Successfully Appended Direct]: {d_link}")
 
-        except Exception as thread_err:
-            print(f"   Skipped thread due to connection error: {thread_err}")
+    except Exception as parse_err:
+        print(f"Data stream text unpack exception: {parse_err}")
+        return
 
     # Step 3: Synchronize updates back up to Cloudflare KV Namespace key
     if len(discovered_urls) > 0:
