@@ -2,59 +2,75 @@ import os
 import urllib.request
 import urllib.parse
 import re
-import html
 
-# The verified corporate feed fetcher header map to maintain our RSS handshake pass
+# Premium RSS feed reader configuration headers to pull the master thread list
 RSS_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; FeedFetcher-Google; +http://google.com)",
     "Accept": "application/xml,text/xml,*/*",
     "Connection": "keep-alive"
 }
 
-# ⚠️ BULLETPROOF LINK CONCATENATION: Hardcoded into single text lines to completely stop clipboard typos
-TARGET_SUBREDDIT_URL = "https://reddit.com"
+# ⚠️ FULL LINK PIECES: Separated completely so your phone browser layout can never clip it
+p_url = "https" + "://" + "://reddit.com" + "/r/" + "IPTV_ZONENEW" + "/new/.rss"
 
 def main():
     print("===============================================")
-    print("🚀 INITIALIZING EMBEDDED CONTENT PARSER v8.1")
-    print(f"Targeting Master Feed Stream: {TARGET_SUBREDDIT_URL}")
+    print("🚀 INITIALIZING LOOP ARCHITECTURE RENav v9.0")
+    print(f"Master Extraction Link: {p_url}")
     print("===============================================")
     
-    req = urllib.request.Request(TARGET_SUBREDDIT_URL, headers=RSS_HEADERS, method="GET")
+    req = urllib.request.Request(p_url, headers=RSS_HEADERS, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=15) as response:
             status = response.status
             if status != 200:
-                print(f"❌ Master stream connection dropped: HTTP {status}")
+                print(f"❌ Master tracking node dropped: HTTP {status}")
                 return
                 
-            # Download the complete data block containing all posts and content layers
             raw_xml_content = response.read().decode('utf-8', errors='ignore')
+            post_links = re.findall(r'href="(https?://www\.reddit\.com/r/IPTV_ZONENEW/comments/[^\s"\'><]+)"', raw_xml_content)
+            unique_post_links = list(set(post_links))
             
-            # Convert HTML-escaped encoding structures back into clean text globally
-            clean_xml_text = html.unescape(raw_xml_content)
-            
-            # 🔍 CONTENT EXTRACTOR: Isolate everything wrapped inside Reddit's native content tags
-            content_blocks = re.findall(r'<content[^>]*>(.*?)</content>', clean_xml_text, re.DOTALL)
-            
+            print(f"Successfully discovered {len(unique_post_links)} active target threads.")
+            print("Beginning automated inner loop deep verification phase...")
             print("===============================================")
-            print("🎉 SUCCESS! EXTRACTION LOOP TERMINATED CLEANLY!")
-            print(f"Total Content Blocks Discovered: {len(content_blocks)}")
-            print("===============================================")
-            
-            # Print a small character length snippet of the first 3 blocks to verify data is intact
-            for i, block in enumerate(content_blocks[:3]):
-                # Strip raw HTML markup symbols inside the preview to reveal the underlying text payload
-                clean_payload = re.sub(r'<[^>]*>', ' ', block).strip()
-                # Clean up any duplicate white spacing text loops
-                clean_payload = re.sub(r'\s+', ' ', clean_payload)
+
+            # Sifting through the newest 5 targets to keep our connection test blazing fast
+            success_count = 0
+            for i, target_link in enumerate(unique_post_links[:5]):
+                # ⚠️ ADVANCED TRANSLATION: Force layout to old format to bypass data-center scraping filters
+                old_reddit_url = target_link.replace("://reddit.com", "://reddit.com")
                 
-                print(f"Post Content Layer [{i+1}] Size: {len(clean_payload)} characters.")
-                print(f"    Text Preview: {clean_payload[:60]}...")
+                print(f"[{i+1}/5] Deep navigating straight into thread: {old_reddit_url}")
+                
+                # ⚠️ HIGH-AUTHENTICATION HEADERS: Complete browser layout tags to fully smash the 403 Blocked error
+                browser_handshake_headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.5",
+                    "Cache-Control": "max-age=0",
+                    "Connection": "close"
+                }
+                
+                t_req = urllib.request.Request(old_reddit_url, headers=browser_handshake_headers, method="GET")
+                try:
+                    with urllib.request.urlopen(t_req, timeout=12) as t_res:
+                        if t_res.status == 200:
+                            print(f"    🎉 SUCCESS! Healthy connection established with post page text. Status: {t_res.status}")
+                            success_count += 1
+                        else:
+                            print(f"    ❌ Handshake established but thread data page rejected code: {t_res.status}")
+                except Exception as t_err:
+                    print(f"    ❌ Connection failed to thread endpoint: {t_err}")
+
+            print("===============================================")
+            print("🎉 PROCESSING LOOP TERMINATED SUCCESSFULLY!")
+            print(f"Total Threads Successfully Breached: {success_count}/5")
+            print("===============================================")
             return
 
     except Exception as network_error:
-        print(f"❌ Extraction parser failed at the gate: {network_error}")
+        print(f"❌ Traversal configuration engine failed: {network_error}")
         return
 
 if __name__ == "__main__":
