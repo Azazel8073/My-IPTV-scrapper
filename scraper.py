@@ -12,7 +12,7 @@ RSS_HEADERS = {
 
 # Baseline layout configurations
 protocol = "https"
-domain = "://reddit.com"
+domain = "reddit.com"
 sub_path = "/r/IPTV_ZONENEW/new/.rss"
 
 TARGET_SUBREDDIT_URL = protocol + "://" + domain + sub_path
