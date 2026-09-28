@@ -16,9 +16,10 @@ cf_p1 = "https:" + "//" + "api."
 cf_p2 = "cloudflare.com" + "/client" + "/v4" + "/accounts"
 CF_MASTER_API_URL = cf_p1 + cf_p2
 
+# High-availability proxy pool targets to avoid reddit rate blocks
 BACKUP_FEEDS = [
-    "https://workers.dev",
     "https://extranic.me",
+    "https://workers.dev",
     "https://opnxng.com"
 ]
 
@@ -62,9 +63,9 @@ def main():
         
         if status == 200 and len(text_response) > 100:
             raw_text_payload = text_response
-            # Parse the root host to standard format maps
+            # FIXED LOGIC: Correctly extracted netloc layout component string parameters
             parsed_uri = urllib.parse.urlparse(target_feed)
-            active_feed_base = f"{parsed_uri.scheme}://{parsed_uri.netext}" if parsed_uri.netext else f"{parsed_uri.scheme}://{parsed_uri.hostname}"
+            active_feed_base = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
             print(f"Success! Pulled raw layout text stream via: {target_feed}")
             break
 
@@ -83,10 +84,10 @@ def main():
 
     clean_search_text = html.unescape(raw_text_payload)
 
-    # ACCURATE PATH RESOLVER: Harvests the unique post ID tokens directly out of comments endpoints
+    # ACCURATE PATH RESOLVER: Harvests the unique post ID tokens directly from both raw proxy paths and json feeds
     post_ids = re.findall(r'/(?:comments|p)/([A-Za-z0-9]{4,12})', clean_search_text)
     if not post_ids:
-        post_ids = re.findall(r'href="/r/IPTV_ZONENEW/comments/([A-Za-z0-9]{4,12})', clean_search_text)
+        post_ids = re.findall(r'href="/r/IPTV_ZONENEW/(?:comments|p)?/?([A-Za-z0-9]{4,12})', clean_search_text)
         
     post_ids = list(set([pid for pid in post_ids if pid not in ["search", "new", "hot", "top", "about", "styles"]]))
     
