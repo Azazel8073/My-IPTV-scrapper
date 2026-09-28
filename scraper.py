@@ -5,6 +5,7 @@ import re
 import base64
 import json
 import time
+import random
 
 # --- CONFIGURATION LOGIC ---
 CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_ACCOUNT_ID", "your_account_id_here")
@@ -48,7 +49,7 @@ def extract_and_decode_base64(content_string):
             if decoded_str.startswith("http://") or decoded_str.startswith("https://"):
                 if "paste.sh/" in decoded_str:
                     url_base = decoded_str.split('#')
-                    decoded_str = url_base.rstrip('/') + '/raw'
+                    decoded_str = url_base[0].rstrip('/') + '/raw'
                 
                 print(f"       🔗 Pulling credentials from target paste provider: {decoded_str}")
                 try:
@@ -98,9 +99,19 @@ def write_to_cloudflare_kv(key, value):
 
 def get_reddit_json_via_anonymizer(target_url):
     """
-    Connects directly to Reddit endpoints using custom footprints to drop server proxy overheads.
+    Direct connection bypass utilizing residential IP spoofing vectors to avoid datacenter 403 blocks.
     """
-    headers = {"User-Agent": "GitHub_Actions_IPTV_Scraper/1.0 (by /u/Azazel8073)"}
+    # Generate a completely randomized fake consumer ISP residential IP signature
+    fake_residential_ip = f"{random.randint(24, 230)}.{random.randint(10, 250)}.{random.randint(10, 250)}.{random.randint(1, 254)}"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "X-Forwarded-For": fake_residential_ip,
+        "X-Real-IP": fake_residential_ip
+    }
+    
     for attempt in range(3):
         try:
             req = urllib.request.Request(target_url, headers=headers, method="GET")
@@ -111,7 +122,7 @@ def get_reddit_json_via_anonymizer(target_url):
             print(f"      ⚠️ Connection retry attempt {attempt + 1} lagged: {e}")
             time.sleep(2)
             
-    raise Exception("Direct network stream channel layout connection timed out completely.")
+    raise Exception("Network stream channel layout connection timed out completely.")
 
 
 def main():
@@ -121,7 +132,7 @@ def main():
     print("===============================================")
     
     try:
-        target_main_feed = "https://reddit.com/r/IPTV_ZONENEW/new.json?limit=10"
+        target_main_feed = "https://reddit.com"
         print("🔄 Requesting master channel registry data directly from core node...")
         feed_data = get_reddit_json_via_anonymizer(target_main_feed)
         
@@ -149,13 +160,13 @@ def main():
                     all_compiled_credentials.extend(found_credentials)
             
             try:
-                comments_url = f"https://reddit.com/r/IPTV_ZONENEW/comments/{token}.json"
+                comments_url = f"https://reddit.com{token}.json"
                 comments_data = get_reddit_json_via_anonymizer(comments_url)
                 
                 # Check for standard comment schema arrays
                 if isinstance(comments_data, list) and len(comments_data) > 1:
-                    comment_root = comments_data[1] if isinstance(comments_data, list) else {}
-                    comment_listings = comment_root.get("data", {}).get("children", []) if isinstance(comment_root, dict) else []
+                    comment_data_block = comments_data[1] if isinstance(comments_data, list) else {}
+                    comment_listings = comment_data_block.get("data", {}).get("children", []) if isinstance(comment_data_block, dict) else []
                     
                     for comment_node in comment_listings:
                         comment_body = comment_node.get("data", {}).get("body", "")
