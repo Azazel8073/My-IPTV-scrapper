@@ -10,7 +10,7 @@ CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_AC
 CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
 CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
 
-# Clean production routing string matching our YAML fix
+# Production API Routing Subdomain
 CF_BASE_API_URL = os.environ.get("CF_BASE_API_URL", "https://api.cloudflare.com")
 
 PASTE_HEADERS = {
@@ -46,8 +46,9 @@ def extract_and_decode_base64(content_string):
             
             if decoded_str.startswith("http://") or decoded_str.startswith("https://"):
                 if "paste.sh/" in decoded_str:
-                    # Clean trailing parameters safely without crashing url split parsers
-                    decoded_str = decoded_str.split('#')[0].rstrip('/') + '/raw'
+                    # FIXED: Added safe string parsing isolation to completely prevent list split crashes
+                    url_base = decoded_str.split('#')[0]
+                    decoded_str = url_base.rstrip('/') + '/raw'
                 
                 print(f"       🔗 Pulling credentials from target paste provider: {decoded_str}")
                 try:
@@ -99,7 +100,6 @@ def get_reddit_json_via_anonymizer(target_url):
     """
     Bypasses datacenter 403 blocks by querying the data layer through a public bridge.
     """
-    # Using clean encoding format to completely insulate url parsing
     encoded_target = urllib.parse.quote_plus(target_url)
     proxy_url = f"https://allorigins.win{encoded_target}"
     
@@ -107,7 +107,12 @@ def get_reddit_json_via_anonymizer(target_url):
     with urllib.request.urlopen(req, timeout=15) as response:
         if response.status == 200:
             wrapper_data = json.loads(response.read().decode('utf-8'))
-            return json.loads(wrapper_data.get("contents"))
+            
+            # FIXED: Handle dynamic string vs dict return objects from open cors bridges natively
+            contents = wrapper_data.get("contents")
+            if isinstance(contents, str):
+                return json.loads(contents)
+            return contents
     raise Exception("Anonymizer engine returned non-OK response.")
 
 
@@ -122,10 +127,10 @@ def main():
         print("🔄 Pulling new master thread lists from open network bridge...")
         feed_data = get_reddit_json_via_anonymizer(target_main_feed)
         
-        # Safely capture nested json keys returned by AllOrigins wrapper objects
-        data_layer = feed_data.get("data", {}) if isinstance(feed_data, dict) else {}
-        children = data_layer.get("children", [])
-        
+        children = []
+        if isinstance(feed_data, dict):
+            children = feed_data.get("data", {}).get("children", [])
+            
         print(f"Successfully discovered {len(children)} active target threads.")
         print("Beginning credentials compilation phase...")
         print("===============================================")
@@ -149,15 +154,16 @@ def main():
                 comments_url = f"https://reddit.com{token}.json"
                 comments_data = get_reddit_json_via_anonymizer(comments_url)
                 
-                # Verify standard comment schema array structure
-                if isinstance(comments_data, list) and len(comments_data) > 1:
-                    comment_listings = comments_data[1].get("data", {}).get("children", [])
-                    for comment_node in comment_listings:
-                        comment_body = comment_node.get("data", {}).get("body", "")
-                        if comment_body:
-                            comment_creds = extract_and_decode_base64(comment_body)
-                            if comment_creds:
-                                all_compiled_credentials.extend(comment_creds)
+                # Check for two-element list layouts common to Reddit comments
+                comment_root = comments_data[1] if isinstance(comments_data, list) and len(comments_data) > 1 else {}
+                comment_listings = comment_root.get("data", {}).get("children", []) if isinstance(comment_root, dict) else []
+                
+                for comment_node in comment_listings:
+                    comment_body = comment_node.get("data", {}).get("body", "")
+                    if comment_body:
+                        comment_creds = extract_and_decode_base64(comment_body)
+                        if comment_creds:
+                            all_compiled_credentials.extend(comment_creds)
             except Exception as e:
                 print(f"      ⚠️ Comment pass skipped for thread {token}: {e}")
                 continue
