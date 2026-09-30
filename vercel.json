@@ -1,6 +1,8 @@
 {
   "version": 2,
   "routes": [
+    { "src": "/player_api.php", "dest": "api/index.py" },
+    { "src": "/get.php", "dest": "api/index.py" },
     { "src": "/(.*)", "dest": "api/index.py" }
   ]
 }
