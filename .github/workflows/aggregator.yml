@@ -9,8 +9,8 @@
 
     - name: Install System Requirements
       run: |
-       python -m pip install --upgrade pip
-       pip install aiohttp
+        python -m pip install --upgrade pip
+        pip install aiohttp
 
     - name: Run Scraper Update Execution Pipeline
       env:
