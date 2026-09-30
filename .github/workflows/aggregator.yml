@@ -1,3 +1,19 @@
+name: Run IPTV Scraper Pipeline
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+env:
+  CLOUDFLARE_ACCOUNT_ID: "${{secrets.CLOUDFLARE_ACCOUNT_ID}}"
+  CLOUDFLARE_NAMESPACE_ID: "${{secrets.CLOUDFLARE_NAMESPACE_ID}}"
+  CLOUDFLARE_API_TOKEN: "${{secrets.CLOUDFLARE_API_TOKEN}}"
+  CF_BASE_API_URL: "https://api.cloudflare.com"
+
+jobs:
+  build-and-sync:
+    runs-on: ubuntu-latest
     steps:
     - name: Check out repository code
       uses: actions/checkout@v3
@@ -11,9 +27,4 @@
       run: pip install aiohttp
 
     - name: Run Scraper Update Execution Pipeline
-      env:
-        CLOUDFLARE_ACCOUNT_ID: "${{secrets.CLOUDFLARE_ACCOUNT_ID}}"
-        CLOUDFLARE_NAMESPACE_ID: "${{secrets.CLOUDFLARE_NAMESPACE_ID}}"
-        CLOUDFLARE_API_TOKEN: "${{secrets.CLOUDFLARE_API_TOKEN}}"
-        CF_BASE_API_URL: "https://api.cloudflare.com"
       run: python scraper.py
